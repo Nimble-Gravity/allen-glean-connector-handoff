@@ -1,0 +1,75 @@
+# Local development stack for the Allen & Co Glean connector.
+#
+#   docker compose -f docker-compose.dev.yml up -d db db-init   # SQL + mock EMS data
+#   docker compose -f docker-compose.dev.yml up api             # Custom Action API (also builds it)
+#
+# The INDEXER is a one-shot batch — the fast dev loop is to run it from a venv
+# against localhost:1433 (see infra/README.md), rather than as a container.
+#
+# Passwords come from the shell / a .env in this dir (see .env.example). Defaults
+# below are dev-only.
+services:
+  # SQL backing. azure-sql-edge is ARM-native (Apple Silicon). On x86 you may
+  # instead use:  image: mcr.microsoft.com/mssql/server:2022-latest
+  db:
+    image: mcr.microsoft.com/azure-sql-edge:latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD:-Str0ng_Passw0rd!}"
+    ports:
+      - "1433:1433"
+    volumes:
+      - mssql-data:/var/opt/mssql
+
+  # Applies infra/sql/mirror_schema.sql + grants.sql once SQL is reachable.
+  db-init:
+    image: mcr.microsoft.com/mssql-tools18:latest
+    depends_on:
+      - db
+    environment:
+      SA_PASSWORD: "${MSSQL_SA_PASSWORD:-Str0ng_Passw0rd!}"
+      GLEAN_DEV_PASSWORD: "${GLEAN_DEV_PASSWORD:-Gl3an_Dev_Passw0rd!}"
+    volumes:
+      - ./infra/sql:/scripts:ro
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        set -e
+        SQLCMD=/opt/mssql-tools18/bin/sqlcmd
+        echo "Waiting for SQL Server to accept connections..."
+        for i in $(seq 1 60); do
+          if $$SQLCMD -S db -U sa -P "$$SA_PASSWORD" -C -l 2 -Q "SELECT 1" >/dev/null 2>&1; then
+            echo "SQL is up."; break
+          fi
+          sleep 2
+        done
+        $$SQLCMD -S db -U sa -P "$$SA_PASSWORD" -C -b -i /scripts/mirror_schema.sql
+        $$SQLCMD -S db -U sa -P "$$SA_PASSWORD" -C -b \
+          -v GLEAN_DEV_PASSWORD="$$GLEAN_DEV_PASSWORD" \
+          -i /scripts/grants.sql
+        echo "Bootstrap complete."
+    restart: "no"
+
+  # Custom Action API against the local SQL. Query with user_email=dev@allenandco.com
+  # (a dev superuser) since the AD/Entra permission cache is still a stub.
+  api:
+    build:
+      context: .
+      dockerfile: allenco_custom_action/Dockerfile
+    depends_on:
+      - db-init
+    ports:
+      - "8000:8000"
+    environment:
+      DB_SERVER: db
+      DB_NAME: ems
+      DB_AUTH_MODE: sql
+      DB_USER: glean_dev
+      DB_PASSWORD: "${GLEAN_DEV_PASSWORD:-Gl3an_Dev_Passw0rd!}"
+      DB_TRUST_SERVER_CERTIFICATE: "true"   # ⚠️ dev only — container cert is self-signed
+      CUSTOM_ACTION_API_KEY: "${CUSTOM_ACTION_API_KEY:-dev-key}"
+      GLEAN_INDEXING_SUPERUSER_ALLOWED_USERS: '["dev@allenandco.com"]'
+
+volumes:
+  mssql-data:

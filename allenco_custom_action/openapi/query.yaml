@@ -1,0 +1,229 @@
+openapi: "3.0.3"
+
+# NOTE: description fields are PROMPTS for the Glean agent. Examples are
+# illustrative — refine per the real EMS columns. Replace servers[0].url with the
+# deployed API host before go-live.
+
+info:
+  title: "Allen & Co EMS — View Query"
+  version: "1.0.0"
+  description: |
+    Use this action to retrieve actual data rows from the Allen & Co EMS views.
+
+    **Use this action when the user asks for specific data:**
+    - "Show me the attendees for company X."
+    - "List the events attendee Y participated in."
+    - "Which companies participated in event Z?"
+
+    **Do NOT use this action when:**
+    - The user only wants to know what views exist → use the EMS Schema Explorer
+      with `show_all_views=true`.
+    - The user wants to know a view's columns → use the Schema Explorer with
+      `show_view_columns`.
+    - You do not know the exact view name or filter column name.
+    - The answer is already in the indexed documents (summaries).
+
+    **Views in scope:** v_Attendee, v_Attendee_Event, v_Company, v_Participation.
+
+    **Row limit:** defaults to 500 rows; set `limit` to any positive integer for more.
+
+servers:
+  - url: "https://SERVER_HOST"
+
+paths:
+  /query:
+    get:
+      operationId: "queryEmsDatabaseView"
+      summary: "Query data rows from an Allen & Co EMS view, with optional column filter"
+      description: |
+        The server verifies the view exists before running the query (404 if not).
+        Result: `data` (array of row objects) and `row_count`. If `row_count`
+        equals `limit`, more data may exist — increase `limit` or add a filter.
+      parameters:
+        - in: query
+          name: user_email
+          required: true
+          schema:
+            type: string
+            format: email
+            example: "jane.doe@allenandco.com"
+          x-glean-typehint: EmailAddress
+          description: |
+            Email of the authenticated Glean user. Always populate with the current
+            user's email. Used for audit logging and AD/Entra permission checks.
+
+        - in: query
+          name: view_name
+          required: true
+          schema:
+            type: string
+            example: "v_Attendee"
+          description: |
+            Exact name of the view to query. Letters, digits, and underscores only.
+            If unknown, call the Schema Explorer with `show_all_views=true` first.
+
+        - in: query
+          name: filter_by_column
+          required: false
+          schema:
+            type: string
+            example: "CompanyID"
+          description: |
+            Exact column name to filter by. Letters, digits, and underscores only.
+            Must be provided together with `filter_value`.
+
+        - in: query
+          name: filter_value
+          required: false
+          schema:
+            type: string
+            example: "12345"
+          description: |
+            Value to match in the filter column. Exact string equality. Always
+            passed as a bound SQL parameter — never interpolated. Requires
+            `filter_by_column`.
+
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 500
+            example: 1000
+          description: "Maximum rows to return (default 500, no server cap)."
+
+        - in: query
+          name: sort_by_column
+          required: false
+          schema:
+            type: string
+            example: "LastName"
+          description: |
+            Column to sort by. Letters, digits, and underscores only. If omitted,
+            a stable but unspecified order is used.
+
+        - in: query
+          name: sort_order
+          required: false
+          schema:
+            type: string
+            enum: ["asc", "desc"]
+            default: "asc"
+            example: "desc"
+          description: "Sort direction; requires sort_by_column."
+
+        - in: query
+          name: select_columns
+          required: false
+          schema:
+            type: string
+            example: "AttendeeID,FirstName,LastName"
+          description: |
+            Comma-separated columns to include. Each must be letters/digits/underscores.
+            If omitted, all columns are returned. Ignored when distinct_column is set.
+
+        - in: query
+          name: distinct_column
+          required: false
+          schema:
+            type: string
+            example: "CompanyName"
+          description: |
+            Distinct-values mode: returns the unique non-null values in this column,
+            sorted. Letters, digits, and underscores only. filter_by_column/filter_value
+            can still scope the distinct values.
+
+      responses:
+        '200':
+          description: "Query executed successfully."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryResponse'
+              examples:
+                with_rows:
+                  value:
+                    data:
+                      - AttendeeID: 101
+                        FirstName: "Ada"
+                        LastName: "Lovelace"
+                        CompanyID: 12345
+                    row_count: 1
+                empty_result:
+                  value:
+                    data: []
+                    row_count: 0
+        '400':
+          description: "Bad request (invalid identifier, missing view_name, invalid limit, etc.)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalid_view_name:
+                  value:
+                    detail: "view_name must contain only letters, digits, and underscores."
+                invalid_sort_order:
+                  value:
+                    detail: "sort_order must be 'asc' or 'desc'."
+        '403':
+          description: "The user is not permitted to access the requested view."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: "The user does not have permission to access this view."
+        '404':
+          description: "The view in `view_name` does not exist."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: "View 'v_NonExistent' not found."
+        '500':
+          description: "Database connection error or unexpected internal server error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: "Database error. Please try again later."
+
+components:
+  schemas:
+    QueryResponse:
+      type: object
+      required:
+        - data
+        - row_count
+      properties:
+        data:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+          description: |
+            Array of result rows. Each element is a flat object keyed by column name.
+            Types reflect the SQL column type; datetimes are ISO 8601 strings.
+          example:
+            - AttendeeID: 101
+              FirstName: "Ada"
+              LastName: "Lovelace"
+        row_count:
+          type: integer
+          description: "Number of rows returned. If equal to `limit`, more may exist."
+          example: 1
+
+    ErrorResponse:
+      type: object
+      required:
+        - detail
+      properties:
+        detail:
+          description: |
+            Error description. A string for server errors (404, 500), or a list of
+            validation error objects for request errors (400).
+      additionalProperties: true

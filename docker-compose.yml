@@ -1,0 +1,13 @@
+services:
+  # One-shot indexer. In production this runs as an Azure Container Apps
+  # scheduled job (runs, indexes, exits — scale-to-zero). This compose file is
+  # for local runs / building the indexer image.
+  indexer:
+    build: .
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/app/logs
+    # The container exits after one run. To schedule locally every 4 hours:
+    #   0 */4 * * *  docker compose -f /path/to/docker-compose.yml run --rm indexer
+    restart: "no"

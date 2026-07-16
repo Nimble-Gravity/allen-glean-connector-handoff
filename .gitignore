@@ -1,0 +1,23 @@
+.vscode/
+.pytest_cache/
+.env
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+logs/
+*.log
+.ruff_cache/
+.outputs/
+notebook/
+__init__.py
+.DS_Store
+
+# Vendored Azure skills (managed via skills-lock.json) — not versioned
+.agents/skills/
+
+# Background/deliverable docs — not versioned
+docs/

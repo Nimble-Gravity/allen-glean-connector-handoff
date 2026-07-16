@@ -1,0 +1,208 @@
+openapi: "3.0.3"
+
+# NOTE: description fields are PROMPTS for the Glean agent. Examples are
+# illustrative — refine per the real EMS columns. Replace servers[0].url with the
+# deployed API host before go-live.
+
+info:
+  title: "Allen & Co EMS — Aggregate"
+  version: "1.0.0"
+  description: |
+    Use this action to compute aggregated metrics (count, sum, average, min, max)
+    from an Allen & Co EMS view, optionally grouped by a column and filtered.
+
+    **Use this action when the user asks for:**
+    - Totals, counts, averages, or extremes: "How many attendees per company?",
+      "How many events did attendee X participate in?"
+    - Breakdowns by category: "Count participations grouped by company."
+    - Any question that needs a number derived from many rows — not the rows themselves.
+
+    **Do NOT use this action when:**
+    - The user wants actual data rows — use the EMS Query action instead.
+    - You do not know the exact view or column names — use the Schema Explorer first.
+    - The answer is a pre-computed summary already in the indexed documents.
+
+    **Key rules:**
+    - `agg_column` is required for `sum`, `avg`, `min`, `max`; NOT needed for `count`.
+    - Omit `group_by_column` for a single total row; provide it for one row per value.
+
+    **Views in scope:** v_Attendee, v_Attendee_Event, v_Company, v_Participation.
+
+servers:
+  - url: "https://SERVER_HOST"
+
+paths:
+  /aggregate:
+    get:
+      operationId: "aggregateEmsDatabaseView"
+      summary: "Compute count/sum/avg/min/max on an Allen & Co EMS view, optionally grouped"
+      description: |
+        Runs an aggregation inside SQL Server and returns summary rows. At most one
+        row per distinct `group_by_column` value, or a single row when omitted.
+      parameters:
+        - in: query
+          name: user_email
+          required: true
+          schema:
+            type: string
+            format: email
+            example: "jane.doe@allenandco.com"
+          x-glean-typehint: EmailAddress
+          description: |
+            Email of the authenticated Glean user. Always populate with the current
+            user's email. Used for audit logging and AD/Entra permission checks.
+
+        - in: query
+          name: view_name
+          required: true
+          schema:
+            type: string
+            example: "v_Participation"
+          description: |
+            Exact name of the view to aggregate. Letters, digits, and underscores only.
+
+        - in: query
+          name: aggregation
+          required: true
+          schema:
+            type: string
+            enum: ["count", "sum", "avg", "min", "max"]
+            example: "count"
+          description: |
+            Aggregation function. `count` uses COUNT(*) (no agg_column). `sum`/`avg`
+            need a numeric `agg_column`. `min`/`max` take the extreme of `agg_column`.
+
+        - in: query
+          name: agg_column
+          required: false
+          schema:
+            type: string
+            example: "Amount"
+          description: |
+            Column the function is applied to. Required for sum/avg/min/max; not for
+            count. Letters, digits, and underscores only.
+
+        - in: query
+          name: group_by_column
+          required: false
+          schema:
+            type: string
+            example: "CompanyID"
+          description: |
+            Column to group by (one row per distinct value). Omit for a single total.
+            Letters, digits, and underscores only.
+
+        - in: query
+          name: filter_by_column
+          required: false
+          schema:
+            type: string
+            example: "EventID"
+          description: "Column to filter by before aggregating. Requires filter_value."
+
+        - in: query
+          name: filter_value
+          required: false
+          schema:
+            type: string
+            example: "42"
+          description: |
+            Value to match (exact equality). Always passed as a bound SQL parameter.
+            Requires filter_by_column.
+
+      responses:
+        '200':
+          description: "Aggregation executed successfully."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AggregateResponse'
+              examples:
+                grouped_count:
+                  summary: "Count participations by company"
+                  value:
+                    data:
+                      - CompanyID: 12345
+                        count: 18
+                      - CompanyID: 67890
+                        count: 5
+                    row_count: 2
+                single_total:
+                  summary: "Total count with no grouping"
+                  value:
+                    data:
+                      - count: 2152
+                    row_count: 1
+        '400':
+          description: "Bad request (invalid aggregation, missing agg_column, invalid identifier)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalid_aggregation:
+                  value:
+                    detail: "aggregation must be one of: count, sum, avg, min, max."
+                missing_agg_column:
+                  value:
+                    detail: "agg_column is required when aggregation is sum, avg, min, or max."
+        '403':
+          description: "The user is not permitted to access the requested view."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: "The user does not have permission to access this view."
+        '404':
+          description: "The view in `view_name` does not exist."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: "View 'v_NonExistent' not found."
+        '500':
+          description: "Database connection error or unexpected internal server error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: "Database error. Please try again later."
+
+components:
+  schemas:
+    AggregateResponse:
+      type: object
+      required:
+        - data
+        - row_count
+      properties:
+        data:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+          description: |
+            Aggregated rows. With group_by_column: one row per group value with the
+            metric (e.g. {"CompanyID": 12345, "count": 18}). Without it: a single row
+            with only the metric. The metric key matches `aggregation`.
+          example:
+            - CompanyID: 12345
+              count: 18
+        row_count:
+          type: integer
+          description: "Number of result rows (distinct groups, or 1 if ungrouped)."
+          example: 2
+
+    ErrorResponse:
+      type: object
+      required:
+        - detail
+      properties:
+        detail:
+          description: |
+            Error description. A string for server errors (404, 500), or a list of
+            validation error objects for request errors (400).
+      additionalProperties: true

@@ -1,0 +1,195 @@
+openapi: "3.0.3"
+
+# NOTE: description fields are PROMPTS for the Glean agent, not just schema docs.
+# Examples below are illustrative — refine per the real EMS columns as they are
+# confirmed. Replace servers[0].url with the deployed API host before go-live.
+
+info:
+  title: "Allen & Co EMS — Schema Explorer"
+  version: "1.0.0"
+  description: |
+    Use this action to explore the structure of the Allen & Co EMS database
+    (read-only views on the Azure SQL Managed Instance).
+
+    **Use this action when the user or you as an AI:**
+    - Asks what views or data are available ("what data can I look at?").
+    - Wants to know what columns a specific view has before querying it.
+    - Needs the exact name of a view or column before calling the Query action.
+
+    **Do NOT use this action when:**
+    - The user wants actual data rows from a view — use the EMS Query action instead.
+    - You already know the exact view name and its columns.
+
+    **Views in scope:** v_Attendee, v_Attendee_Event, v_Company, v_Participation.
+
+    **Important:** Each request does ONE operation: list all views OR list columns
+    for a view. Never both in the same request.
+
+servers:
+  - url: "https://SERVER_HOST"
+
+paths:
+  /metadata:
+    get:
+      operationId: "exploreEmsDatabaseSchema"
+      summary: "Explore the Allen & Co EMS schema: list available views or columns of a view"
+      description: |
+        Returns structural metadata from the EMS database. Both modes cannot be
+        used in the same request. If the user asks for both, make two separate calls.
+      parameters:
+        - in: query
+          name: user_email
+          required: true
+          schema:
+            type: string
+            format: email
+            example: "jane.doe@allenandco.com"
+          x-glean-typehint: EmailAddress
+          description: |
+            Email of the authenticated Glean user making the request. Always
+            populate with the current user's email. Used for audit logging and
+            AD/Entra permission checks.
+
+        - in: query
+          name: show_all_views
+          required: false
+          schema:
+            type: boolean
+            default: false
+            example: true
+          description: |
+            Set to `true` to retrieve the complete list of EMS view names.
+            Cannot be combined with `show_view_columns` in the same request.
+
+        - in: query
+          name: show_view_columns
+          required: false
+          schema:
+            type: string
+            example: "v_Attendee"
+          description: |
+            Exact name of the view whose columns you want to inspect. Letters,
+            digits, and underscores only. Cannot be combined with `show_all_views`.
+
+      responses:
+        '200':
+          description: "Schema metadata retrieved successfully."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetadataResponse'
+              examples:
+                views_response:
+                  summary: "Response when show_all_views=true"
+                  value:
+                    user_email: "jane.doe@allenandco.com"
+                    views:
+                      - "v_Attendee"
+                      - "v_Attendee_Event"
+                      - "v_Company"
+                      - "v_Participation"
+                columns_response:
+                  summary: "Response when show_view_columns is set"
+                  value:
+                    user_email: "jane.doe@allenandco.com"
+                    view: "v_Company"
+                    columns:
+                      - column_name: "CompanyID"
+                        data_type: "int"
+                        is_nullable: "NO"
+                      - column_name: "CompanyName"
+                        data_type: "varchar"
+                        is_nullable: "NO"
+        '400':
+          description: |
+            Bad request. Causes: both parameters provided; neither provided; or
+            `show_view_columns` contains invalid characters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                mutual_exclusion:
+                  value:
+                    detail: "show_all_views and show_view_columns are mutually exclusive — provide only one."
+                neither_provided:
+                  value:
+                    detail: "Provide show_all_views=true to list views, or show_view_columns=<view_name> to list columns."
+                invalid_identifier:
+                  value:
+                    detail: "show_view_columns must contain only letters, digits, and underscores."
+        '403':
+          description: "The user is not permitted to access the requested view."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: "The user does not have permission to access this view."
+        '404':
+          description: "The view in `show_view_columns` does not exist."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: "View 'v_NonExistent' not found or has no columns."
+        '500':
+          description: "Database connection error or unexpected internal server error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: "Database error. Please try again later."
+
+components:
+  schemas:
+    MetadataResponse:
+      type: object
+      properties:
+        user_email:
+          type: string
+          example: "jane.doe@allenandco.com"
+        views:
+          type: array
+          items:
+            type: string
+          description: "View names available. Present only when show_all_views=true."
+          example:
+            - "v_Attendee"
+            - "v_Company"
+        view:
+          type: string
+          description: "View whose columns were retrieved. Present only with show_view_columns."
+          example: "v_Company"
+        columns:
+          type: array
+          items:
+            $ref: '#/components/schemas/ColumnInfo'
+          description: "Column definitions for the requested view, in ordinal order."
+
+    ColumnInfo:
+      type: object
+      description: "Metadata for a single column in an EMS view."
+      properties:
+        column_name:
+          type: string
+          example: "CompanyName"
+        data_type:
+          type: string
+          example: "varchar"
+        is_nullable:
+          type: string
+          enum: ["YES", "NO"]
+          example: "NO"
+
+    ErrorResponse:
+      type: object
+      required:
+        - detail
+      properties:
+        detail:
+          description: "Error message string describing what went wrong."
+          type: string
+      additionalProperties: true

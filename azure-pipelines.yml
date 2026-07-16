@@ -1,0 +1,66 @@
+# Azure DevOps CI/CD for the Allen & Co Glean connector.
+# Matches the architecture: Azure DevOps -> Azure Container Registry -> Azure
+# Container Apps. Builds the two images (indexer + custom-action) with `az acr
+# build` (server-side) and deploys the Container Apps Job + App via infra/allenco.
+#
+# Configure once in Azure DevOps:
+#   - an ARM service connection (azureServiceConnection) with rights on the RG/ACR
+#   - pipeline variables / a variable group for resourceGroup and acrName
+#   - infra/allenco/main.bicepparam filled with Allen's existing resource IDs
+#
+# This mirrors infra/allenco/deploy.sh — the pipeline is just the CI wrapper.
+
+trigger:
+  branches:
+    include:
+      - main
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  azureServiceConnection: 'allenco-azure'      # ARM service connection name
+  resourceGroup: 'allenco-connector-rg'
+  acrName: 'allencoacr'
+  indexerImage: 'indexer:$(Build.BuildId)'
+  apiImage: 'custom-action:$(Build.BuildId)'
+
+stages:
+  - stage: BuildAndDeploy
+    displayName: 'Build images and deploy Container Apps'
+    jobs:
+      - job: build_and_deploy
+        steps:
+          - checkout: self
+
+          - task: AzureCLI@2
+            displayName: 'az acr build (indexer + custom-action)'
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                az acr build --registry "$(acrName)" --image "$(indexerImage)" \
+                  --file Dockerfile .
+                az acr build --registry "$(acrName)" --image "$(apiImage)" \
+                  --file allenco_custom_action/Dockerfile .
+
+          - task: AzureCLI@2
+            displayName: 'Deploy Container Apps (Job + App)'
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                az deployment group create \
+                  --name "allenco-connector-$(Build.BuildId)" \
+                  --resource-group "$(resourceGroup)" \
+                  --template-file infra/allenco/main.bicep \
+                  --parameters infra/allenco/main.bicepparam \
+                  --parameters indexerImage="$(indexerImage)" apiImage="$(apiImage)"
+                echo "API endpoint:"
+                az deployment group show --resource-group "$(resourceGroup)" \
+                  --name "allenco-connector-$(Build.BuildId)" \
+                  --query properties.outputs.apiEndpoint.value -o tsv
