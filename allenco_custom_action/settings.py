@@ -11,8 +11,10 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Load the shared .env from the project root (one level up).
-load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env", override=True)
+# Load the shared .env from the project root (one level up). override=False so real
+# environment variables (container-injected in prod, or set by the test harness) win
+# over the file — a .env must never clobber values already present in os.environ.
+load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env", override=False)
 
 # Azure SQL authentication modes (mirror of config.config).
 AUTH_MODE_SQL = "sql"

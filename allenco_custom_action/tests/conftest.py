@@ -10,16 +10,14 @@ import sys
 from pathlib import Path
 
 import pytest
-from dotenv import load_dotenv
 
 _API_DIR = Path(__file__).resolve().parent.parent
 if str(_API_DIR) not in sys.path:
     sys.path.insert(0, str(_API_DIR))
 
-# Load the shared .env before any module reads os.environ.
-load_dotenv(dotenv_path=_API_DIR.parent / ".env", override=True)
-
-# Minimal env so load_db_settings()/load_api_key() succeed during app startup.
+# Tests are isolated from any real .env: we set only the minimal env the app needs
+# at startup. settings.py loads .env with override=False, so a developer's local
+# .env (with placeholder values) can never clobber these test values.
 os.environ.setdefault("CUSTOM_ACTION_API_KEY", "test-key")
 os.environ.setdefault("DB_SERVER", "test-server")
 os.environ.setdefault("DB_NAME", "test-db")
