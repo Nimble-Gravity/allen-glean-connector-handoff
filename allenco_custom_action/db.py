@@ -29,7 +29,7 @@ _DEFAULT_RETRY_ATTEMPTS = 3
 _DEFAULT_RETRY_DELAY = 5.0
 
 
-def build_connection_string(settings: DbSettings, *, connect_timeout: int) -> str:
+def build_connection_string(settings: DbSettings) -> str:
     """Build the pyodbc connection string for the configured auth mode.
 
     Mirror of allenco_connector.db_connection.build_connection_string. See
@@ -39,7 +39,6 @@ def build_connection_string(settings: DbSettings, *, connect_timeout: int) -> st
         f"DRIVER={{{settings.driver}}};",
         f"SERVER={settings.server},{settings.port};",
         f"DATABASE={settings.database};",
-        f"Connection Timeout={connect_timeout};",
         f"Encrypt={'yes' if settings.encrypt else 'no'};",
         f"TrustServerCertificate={'yes' if settings.trust_server_certificate else 'no'};",
     ]
@@ -76,7 +75,7 @@ def get_connection(
     Raises:
         pyodbc.Error: If all connection attempts fail.
     """
-    connection_string = build_connection_string(settings, connect_timeout=connect_timeout)
+    connection_string = build_connection_string(settings)
 
     last_exc: Exception | None = None
     for attempt in range(1, retry_attempts + 1):

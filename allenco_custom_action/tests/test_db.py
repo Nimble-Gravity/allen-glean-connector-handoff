@@ -21,33 +21,26 @@ def _settings(**overrides) -> DbSettings:
 
 
 def test_sql_auth_includes_credentials_and_validates_cert():
-    cs = build_connection_string(_settings(), connect_timeout=30)
+    cs = build_connection_string(_settings())
     assert "UID=glean_ro;" in cs
     assert "PWD=secret;" in cs
     assert "TrustServerCertificate=no;" in cs
 
 
 def test_msi_auth_omits_credentials():
-    cs = build_connection_string(
-        _settings(auth_mode=AUTH_MODE_MSI, user="", password=""), connect_timeout=30
-    )
+    cs = build_connection_string(_settings(auth_mode=AUTH_MODE_MSI, user="", password=""))
     assert "Authentication=ActiveDirectoryMsi;" in cs
     assert "UID=" not in cs
 
 
 def test_msi_user_assigned_appends_client_id():
     cs = build_connection_string(
-        _settings(
-            auth_mode=AUTH_MODE_MSI, user="", password="", msi_client_id="abc-123-client"
-        ),
-        connect_timeout=30,
+        _settings(auth_mode=AUTH_MODE_MSI, user="", password="", msi_client_id="abc-123-client")
     )
     assert "Authentication=ActiveDirectoryMsi;" in cs
     assert "UID=abc-123-client;" in cs
 
 
 def test_default_auth_uses_active_directory_default():
-    cs = build_connection_string(
-        _settings(auth_mode=AUTH_MODE_DEFAULT, user="", password=""), connect_timeout=30
-    )
+    cs = build_connection_string(_settings(auth_mode=AUTH_MODE_DEFAULT, user="", password=""))
     assert "Authentication=ActiveDirectoryDefault;" in cs
