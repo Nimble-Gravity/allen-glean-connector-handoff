@@ -2,11 +2,11 @@
  * Read-only DEV SQL login for the Allen & Co Glean connector.
  *
  * glean_dev is the DEVELOPMENT login (used during build/test via Azure Bastion),
- * granted SELECT on ONLY the four in-scope views — no writes, no base-table
+ * granted SELECT on ONLY the four in-scope views -no writes, no base-table
  * access. It is temporary and removed at go-live.
  *
  * PRODUCTION does NOT use a SQL login: the connector authenticates with a
- * passwordless MANAGED IDENTITY — see infra/sql/mi_user.sql. No production SQL
+ * passwordless MANAGED IDENTITY -see infra/sql/mi_user.sql. No production SQL
  * credentials exist or are shared with anyone.
  *
  * Run AFTER mirror_schema.sql. Pass the password as a sqlcmd variable:

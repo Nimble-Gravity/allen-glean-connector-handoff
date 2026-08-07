@@ -6,16 +6,16 @@
  *   v_Attendee, v_Attendee_Event, v_Company, v_Participation
  *
  * The view columns intentionally match the placeholder columns used by the
- * connector's per-view builders (src/allenco_connector/views/*/document_builder.py):
- *   v_Attendee        → AttendeeID, FirstName, LastName
- *   v_Attendee_Event  → AttendeeEventID, EventName, AttendeeID
- *   v_Company         → CompanyID, CompanyName
- *   v_Participation   → ParticipationID, CompanyID, AttendeeID
+ * connector's view catalog (src/allenco_connector/views/catalog.py):
+ *   v_Attendee        -> AttendeeID, FirstName, LastName
+ *   v_Attendee_Event  -> AttendeeEventID, EventName, AttendeeID
+ *   v_Company         -> CompanyID, CompanyName
+ *   v_Participation   -> ParticipationID, CompanyID, AttendeeID
  *
- * Each view also exposes ModifiedDate — the change-tracking column the connector
- * uses for INCREMENTAL sync (WATERMARK_COLUMN in views/*/query.py).
+ * Each view also exposes ModifiedDate - the change-tracking column the connector
+ * uses for INCREMENTAL sync (watermark_column in views/catalog.py).
  *
- * ⚠️ This is a MOCK for local Docker + the Azure dev mirror. When Allen & Co
+ * WARNING: This is a MOCK for local Docker + the Azure dev mirror. When Allen & Co
  * confirms the real EMS schema, update this file and the document builders (and
  * confirm the real change-tracking column, if any).
  *

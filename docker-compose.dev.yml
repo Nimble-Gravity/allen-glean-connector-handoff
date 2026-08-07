@@ -17,13 +17,19 @@ services:
       ACCEPT_EULA: "Y"
       MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD:-Str0ng_Passw0rd!}"
     ports:
-      - "1433:1433"
+      # Host port is overridable (DB_HOST_PORT) so it can dodge a 1433 already in
+      # use by another local SQL container. Container port stays 1433.
+      - "${DB_HOST_PORT:-1433}:1433"
     volumes:
       - mssql-data:/var/opt/mssql
 
   # Applies infra/sql/mirror_schema.sql + grants.sql once SQL is reachable.
   db-init:
-    image: mcr.microsoft.com/mssql-tools18:latest
+    # mssql-tools ships sqlcmd (the older mssql-tools18:latest tag no longer
+    # resolves). It is amd64-only; pin the platform so it runs (emulated on Apple
+    # Silicon) instead of failing to resolve.
+    image: mcr.microsoft.com/mssql-tools:latest
+    platform: linux/amd64
     depends_on:
       - db
     environment:
@@ -36,7 +42,7 @@ services:
       - -c
       - |
         set -e
-        SQLCMD=/opt/mssql-tools18/bin/sqlcmd
+        SQLCMD=/opt/mssql-tools/bin/sqlcmd
         echo "Waiting for SQL Server to accept connections..."
         for i in $(seq 1 60); do
           if $$SQLCMD -S db -U sa -P "$$SA_PASSWORD" -C -l 2 -Q "SELECT 1" >/dev/null 2>&1; then
@@ -45,9 +51,10 @@ services:
           sleep 2
         done
         $$SQLCMD -S db -U sa -P "$$SA_PASSWORD" -C -b -i /scripts/mirror_schema.sql
-        $$SQLCMD -S db -U sa -P "$$SA_PASSWORD" -C -b \
-          -v GLEAN_DEV_PASSWORD="$$GLEAN_DEV_PASSWORD" \
-          -i /scripts/grants.sql
+        # grants.sql uses $(GLEAN_DEV_PASSWORD); sqlcmd resolves it from the env var
+        # of the same name (set above). The older mssql-tools sqlcmd rejects `-v`,
+        # and environment scripting variables work without it.
+        $$SQLCMD -S db -U sa -P "$$SA_PASSWORD" -C -b -i /scripts/grants.sql
         echo "Bootstrap complete."
     restart: "no"
 
