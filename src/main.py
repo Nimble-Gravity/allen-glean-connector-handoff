@@ -182,10 +182,21 @@ def _run(
         superusers=indexing_superusers,
     )
 
+    if settings.fetch_row_limit:
+        logger.info(
+            "FETCH_ROW_LIMIT=%d — sampling up to %d row(s) per view (SELECT TOP).",
+            settings.fetch_row_limit,
+            settings.fetch_row_limit,
+        )
+
     documents: list = []
     if conn is not None:
         try:
-            for spec in build_view_specs(VIEW_CATALOG, default_schema=db_settings.schema):
+            for spec in build_view_specs(
+                VIEW_CATALOG,
+                default_schema=db_settings.schema,
+                row_limit=settings.fetch_row_limit,
+            ):
                 since = sync_state.watermark_for(spec.view_name) if use_incremental else None
                 logger.info(
                     "Fetching %s (%s).",

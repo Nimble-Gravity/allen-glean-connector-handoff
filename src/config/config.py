@@ -40,6 +40,10 @@ class ConnectorSettings:
     log_debug: bool
     debug_files: bool
 
+    # Max rows fetched per view (FETCH_ROW_LIMIT). 0 = no limit; >0 → SELECT TOP (N),
+    # for a fast dry-run sample or to cap very large views.
+    fetch_row_limit: int = 0
+
     def require_glean_indexing_prereqs(self) -> tuple[str, GleanConfig]:
         """Return (datasource, glean_config). Raises ValueError if misconfigured."""
         datasource = self.glean_datasource.strip()
@@ -173,6 +177,7 @@ def load_connector_settings() -> ConnectorSettings:
         ),
         log_debug=_read_bool_env("LOG_DEBUG", default=False),
         debug_files=_read_bool_env("DEBUG_FILES", default=False),
+        fetch_row_limit=max(0, _read_int_env("FETCH_ROW_LIMIT", default=0)),
     )
 
 
@@ -238,6 +243,16 @@ def _read_bool_env(key: str, *, default: bool) -> bool:
     if raw in ("0", "false", "no"):
         return False
     return default
+
+
+def _read_int_env(key: str, *, default: int) -> int:
+    raw = (os.environ.get(key) or "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
 
 
 def _read_str_env(key: str, *, default: str = "") -> str:

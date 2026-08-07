@@ -31,11 +31,15 @@ class ViewSpec:
     build: BuildFn
     watermark_column: str | None = None
     schema: str = "dbo"
+    row_limit: int = 0  # 0 = no limit; >0 → SELECT TOP (N) (dry-run sample / hard cap)
 
     def fetch(self, conn: pyodbc.Connection, *, since: str | None = None) -> pd.DataFrame:
         """Read the view. Incremental (``[watermark] > since``) when a watermark
-        column is set and ``since`` is provided; otherwise a full read."""
-        base = f"SELECT * FROM [{self.schema}].[{self.view_name}]"
+        column is set and ``since`` is provided; otherwise a full read. When
+        ``row_limit`` > 0, only the first N rows are read (``SELECT TOP (N)``) — a
+        dry-run sample or a cap for very large views."""
+        top = f"TOP ({self.row_limit}) " if self.row_limit > 0 else ""
+        base = f"SELECT {top}* FROM [{self.schema}].[{self.view_name}]"
         if since is not None and self.watermark_column:
             sql = f"{base} WHERE [{self.watermark_column}] > ? ORDER BY [{self.watermark_column}]"
             return pd.read_sql(sql, conn, params=[since])
@@ -66,11 +70,13 @@ def build_view_specs(
     catalog: Iterable[ViewCatalogEntry],
     *,
     default_schema: str = "dbo",
+    row_limit: int = 0,
 ) -> tuple[ViewSpec, ...]:
     """Build one ViewSpec per catalog entry.
 
     An entry's ``schema`` overrides ``default_schema`` (from DB_SCHEMA); an entry's
-    ``build`` overrides the generic row→document mapping.
+    ``build`` overrides the generic row→document mapping. ``row_limit`` (from
+    FETCH_ROW_LIMIT) applies to every view's fetch — 0 means no limit.
     """
     return tuple(
         ViewSpec(
@@ -78,6 +84,7 @@ def build_view_specs(
             build=builder_for(entry),
             watermark_column=entry.watermark_column,
             schema=entry.schema or default_schema,
+            row_limit=row_limit,
         )
         for entry in catalog
     )

@@ -68,3 +68,21 @@ def test_fetch_uses_schema_qualified_name(monkeypatch):
     spec.fetch(conn=None)
     assert "[Conference].[v_Company]" in cap["sql"]
     assert reg  # registry module import kept for clarity
+
+
+def test_row_limit_adds_select_top(monkeypatch):
+    cap = {}
+
+    def _fake(sql, conn, params=None):
+        cap["sql"] = sql
+        return pd.DataFrame({"CompanyID": [1]})
+
+    monkeypatch.setattr(pd, "read_sql", _fake)
+    entry = ViewCatalogEntry(view_name="v_Company", object_type="company", id_column="CompanyID")
+    (spec,) = build_view_specs([entry], default_schema="cnf", row_limit=100)
+    spec.fetch(conn=None)
+    assert cap["sql"].startswith("SELECT TOP (100) *")
+    # no limit → no TOP
+    (spec2,) = build_view_specs([entry], default_schema="cnf", row_limit=0)
+    spec2.fetch(conn=None)
+    assert "TOP" not in cap["sql"]
