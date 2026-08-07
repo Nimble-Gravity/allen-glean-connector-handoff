@@ -35,7 +35,5 @@ def test_health_no_auth_returns_200(_recorder):
 
 def test_protected_route_still_requires_bearer(_recorder):
     with TestClient(api_main.app) as client:
-        resp = client.get(
-            "/metadata", params={"user_email": "a@b.com", "show_all_views": "true"}
-        )
+        resp = client.get("/metadata", params={"user_email": "a@b.com", "show_all_views": "true"})
     assert resp.status_code == 401
