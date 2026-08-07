@@ -5,18 +5,29 @@ configuration, not code"). ``registry.build_view_specs`` turns each entry into a
 runnable ViewSpec that reads the view and maps every row to one Glean document via
 the generic ``rows_to_documents`` builder — no per-view Python required.
 
-HOW TO POPULATE against the real Allen & Co "Conference" schema:
-  1. On the dev VM (real DB reachable) run ``python scripts/discover_schema.py``.
-     It dumps ``.outputs/schema.json`` and prints ready-to-paste catalog entries
-     for every Conference view (with guessed id / title / watermark columns).
-  2. Replace the seed entries below with those, correcting the guessed columns
-     against the real schema. Set ``schema=None`` to inherit DB_SCHEMA (recommended
-     so you set the Conference schema once in .env), or pin it per entry.
-  3. Re-run the dry run and inspect ``.outputs/ems_documents.json``.
+The in-scope views are the **`cnf` (Conference) schema** of the Allen & Co
+``Conference`` database — 11 views covering attendees, their event profiles,
+activities, and travel. Confirmed via ``scripts/discover_schema.py`` against the
+real DB (server aml-azr-sql-001, database ``Conference``). Connect with
+``DB_NAME=Conference``; each entry pins ``schema="cnf"`` so it works regardless of
+``DB_SCHEMA``.
 
-The entries below are a SEED matching the mock schema (infra/sql/mirror_schema.sql)
-so the pipeline and tests run today. The column names are the mock's, NOT confirmed
-against the real EMS — treat them as placeholders until step 2.
+To refine or extend: re-run ``python scripts/discover_schema.py`` on the VM (dumps
+``.outputs/schema.json`` + pasteable entries), edit below, then dry-run and inspect
+``.outputs/ems_documents_*.json``.
+
+⚠️ Two things to confirm with the client (flagged inline):
+  - The 🟡 travel/junction views (v_TravelAir, v_TravelGroupInfo, v_ActivityAttendants)
+    lack a single unique row key, so a document-per-row can collide (e.g. multiple
+    flights per attendee). The dry run will surface duplicate ids; fix with the real
+    PK or a composite id (via a per-entry ``build`` override).
+  - Only v_Attendee exposes a real change-tracking column (``UpdatedOn``). The rest
+    full-fetch each run (``watermark_column=None``) — the discovery heuristic's
+    date guesses (DOB/StartDate/…) are NOT modification timestamps.
+
+NOTE: this catalog now targets the real cnf schema; the local Docker mock
+(infra/sql/mirror_schema.sql, dbo) no longer matches it. Update the mock to mirror
+these views if you want to keep the local smoke-test loop.
 """
 
 from collections.abc import Callable
@@ -53,31 +64,100 @@ class ViewCatalogEntry:
     build: BuildFn | None = field(default=None, compare=False)
 
 
-# SEED — mock EMS columns; confirm/replace against the real Conference schema.
+# The cnf (Conference) schema — 11 views. Columns confirmed against the real DB
+# (scripts/discover_schema.py). schema="cnf" is pinned per entry.
 VIEW_CATALOG: tuple[ViewCatalogEntry, ...] = (
+    # -- core entities (clear per-row key) ------------------------------------
     ViewCatalogEntry(
         view_name="v_Attendee",
         object_type="attendee",
-        id_column="AttendeeID",
+        id_column="RecordID",
         title_columns=("FirstName", "LastName"),
+        watermark_column="UpdatedOn",  # the only real change-tracking column
+        schema="cnf",
     ),
     ViewCatalogEntry(
-        view_name="v_Attendee_Event",
-        object_type="attendee_event",
-        id_column="AttendeeEventID",
-        title_columns=("EventName", "AttendeeID"),
+        view_name="v_StartInformation",
+        object_type="start_information",
+        id_column="EventInstanceAttendeeID",
+        title_columns=("FirstName", "LastName"),
+        watermark_column=None,
+        schema="cnf",
     ),
     ViewCatalogEntry(
-        view_name="v_Company",
-        object_type="company",
-        id_column="CompanyID",
-        title_columns=("CompanyName",),
+        view_name="v_AttendeeContact",
+        object_type="attendee_contact",
+        id_column="AttendeeID",
+        title_columns=("Email",),
+        watermark_column=None,
+        schema="cnf",
     ),
     ViewCatalogEntry(
-        view_name="v_Participation",
-        object_type="participation",
-        id_column="ParticipationID",
-        title_columns=("CompanyID", "AttendeeID"),
+        view_name="v_AssistantsInformation",
+        object_type="assistant",
+        id_column="RowID",
+        title_columns=("Name",),
+        watermark_column=None,
+        schema="cnf",
+    ),
+    ViewCatalogEntry(
+        view_name="v_Activity",
+        object_type="activity",
+        id_column="RecordID",
+        title_columns=("Name",),
+        watermark_column=None,
+        schema="cnf",
+    ),
+    # -- 🟡 travel / junction: id_column is a best guess and may COLLIDE per row.
+    #    Confirm the real PK (or use a composite id via a build override).
+    ViewCatalogEntry(
+        view_name="v_ActivityAttendants",
+        object_type="activity_attendant",
+        id_column="EventInstanceActivityID",  # TODO: confirm unique per row
+        title_columns=("FirstName", "LastName"),
+        watermark_column=None,
+        schema="cnf",
+    ),
+    ViewCatalogEntry(
+        view_name="v_TravelAir",
+        object_type="travel_air",
+        id_column="AttendeeID",  # TODO: NOT unique per row (many flights/attendee)
+        title_columns=("FirstName", "LastName"),
+        watermark_column=None,
+        schema="cnf",
+    ),
+    ViewCatalogEntry(
+        view_name="v_TravelGroupInfo",
+        object_type="travel_group",
+        id_column="HeadID",  # TODO: confirm unique per row
+        title_columns=(),
+        watermark_column=None,
+        schema="cnf",
+    ),
+    # -- 🔵 small reference/lookup views (low search value; drop if not useful) -
+    ViewCatalogEntry(
+        view_name="v_Airline",
+        object_type="airline",
+        id_column="RecordID",
+        title_columns=(),
+        watermark_column=None,
+        schema="cnf",
+    ),
+    ViewCatalogEntry(
+        view_name="v_GarmentSizes",
+        object_type="garment_size",
+        id_column="RecordID",
+        title_columns=("NameAlias",),
+        watermark_column=None,
+        schema="cnf",
+    ),
+    ViewCatalogEntry(
+        view_name="v_PreferenceType",
+        object_type="preference_type",
+        id_column="RecordID",
+        title_columns=("Description",),
+        watermark_column=None,
+        schema="cnf",
     ),
 )
 

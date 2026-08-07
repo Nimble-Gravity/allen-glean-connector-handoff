@@ -7,10 +7,17 @@ from allenco_connector.views.catalog import VIEW_CATALOG, ViewCatalogEntry, buil
 from allenco_connector.views.registry import build_view_specs
 
 
-def test_build_view_specs_applies_default_schema():
-    specs = build_view_specs(VIEW_CATALOG, default_schema="Conference")
+def test_default_schema_inherited_when_entry_unset():
+    entry = ViewCatalogEntry(view_name="v_X", object_type="x", id_column="XID")  # schema=None
+    (spec,) = build_view_specs([entry], default_schema="Conference")
+    assert spec.schema == "Conference"
+
+
+def test_real_catalog_pins_cnf_schema():
+    specs = build_view_specs(VIEW_CATALOG, default_schema="dbo")
     assert len(specs) == len(VIEW_CATALOG)
-    assert all(s.schema == "Conference" for s in specs)
+    # the Conference catalog pins schema="cnf" on every entry, so DB_SCHEMA is moot.
+    assert all(s.schema == "cnf" for s in specs)
 
 
 def test_entry_schema_overrides_default():
