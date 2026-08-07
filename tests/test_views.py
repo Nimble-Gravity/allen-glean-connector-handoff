@@ -22,7 +22,7 @@ def test_builds_one_document_per_row():
         title_columns=("FirstName", "LastName"),
     )
     assert len(docs) == 2
-    assert docs[0].id == "1"
+    assert docs[0].id == "attendee:1"  # id is namespaced by object_type
     assert docs[0].title == "Ada – Lovelace"
     assert docs[0].datasource == "allenco_ems"
 

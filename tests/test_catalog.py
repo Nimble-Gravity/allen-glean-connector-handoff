@@ -37,7 +37,7 @@ def test_generic_builder_maps_rows():
     df = pd.DataFrame([{"CompanyID": 7, "CompanyName": "Acme"}])
     docs = build(df, datasource="allenco_ems")
     assert len(docs) == 1
-    assert docs[0].id == "7"
+    assert docs[0].id == "company:7"  # id namespaced by object_type
     assert docs[0].title == "Acme"
 
 

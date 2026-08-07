@@ -42,9 +42,11 @@ def rows_to_documents(
     for position, (_, row) in enumerate(df.iterrows()):
         payload = {key: _jsonable(value) for key, value in row.to_dict().items()}
         raw_id = row[id_column] if id_column in row else None
-        document_id = str(raw_id).strip() if raw_id is not None and pd.notna(raw_id) else ""
-        if not document_id:
-            document_id = f"{object_type}:{position}"
+        row_key = str(raw_id).strip() if raw_id is not None and pd.notna(raw_id) else ""
+        # Prefix with object_type so ids stay unique ACROSS views that reuse a column
+        # name (several cnf views key on RecordID). Uniqueness WITHIN a view still
+        # depends on id_column being a real per-row key (see the catalog's TODOs).
+        document_id = f"{object_type}:{row_key or position}"
 
         title_parts = [str(row[c]) for c in title_columns if c in row and pd.notna(row[c])]
         title = " – ".join(title_parts) if title_parts else f"{object_type} {document_id}"
