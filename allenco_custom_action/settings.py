@@ -29,6 +29,9 @@ class DbSettings:
 
     server: str
     database: str
+    # Default schema the in-scope views live in (mirror of config.config.DbSettings).
+    # "dbo" for the mock; set DB_SCHEMA=Conference for the real Allen & Co views.
+    schema: str = "dbo"
     port: int = 1433
     driver: str = "ODBC Driver 18 for SQL Server"
     auth_mode: str = AUTH_MODE_SQL
@@ -57,6 +60,7 @@ def load_db_settings() -> DbSettings:
     return DbSettings(
         server=_read_required_str_env("DB_SERVER"),
         database=_read_required_str_env("DB_NAME"),
+        schema=_read_str_env("DB_SCHEMA", default="dbo") or "dbo",
         port=int(_read_str_env("DB_PORT", default="1433") or "1433"),
         driver=_read_str_env("DB_DRIVER", default="ODBC Driver 18 for SQL Server"),
         auth_mode=auth_mode,

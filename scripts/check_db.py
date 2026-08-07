@@ -26,10 +26,9 @@ load_dotenv(dotenv_path=ROOT / ".env", override=True)
 
 import pyodbc  # noqa: E402
 
-from config.config import load_db_settings  # noqa: E402
 from allenco_connector.db_connection import build_connection_string  # noqa: E402
-
-VIEWS = ["v_Attendee", "v_Attendee_Event", "v_Company", "v_Participation"]
+from allenco_connector.views.catalog import VIEW_CATALOG  # noqa: E402
+from config.config import load_db_settings  # noqa: E402
 
 
 def main() -> int:
@@ -47,9 +46,10 @@ def main() -> int:
         print("CONFIG ERROR      :", exc)
         return 2
 
-    conn_str = build_connection_string(settings, connect_timeout=5)
+    conn_str = build_connection_string(settings)
     masked = conn_str.replace(settings.password, "***") if settings.password else conn_str
     print("CONN STRING       :", masked)
+    print("DB_SCHEMA         :", repr(settings.schema))
 
     try:
         conn = pyodbc.connect(conn_str, timeout=5)
@@ -62,12 +62,15 @@ def main() -> int:
         cur = conn.cursor()
         cur.execute("SELECT 1")
         print("CONNECT           : PASS (SELECT 1 ->", cur.fetchone()[0], ")")
-        for view in VIEWS:
+        # Probe the in-scope views from the catalog, schema-qualified (an entry may
+        # pin its own schema; otherwise it inherits DB_SCHEMA).
+        for entry in VIEW_CATALOG:
+            qualified = f"[{entry.schema or settings.schema}].[{entry.view_name}]"
             try:
-                cur.execute(f"SELECT COUNT(*) FROM {view}")
-                print(f"  {view:<20}: {cur.fetchone()[0]} rows")
+                cur.execute(f"SELECT COUNT(*) FROM {qualified}")
+                print(f"  {qualified:<32}: {cur.fetchone()[0]} rows")
             except Exception as exc:
-                print(f"  {view:<20}: ERROR {str(exc)[:120]}")
+                print(f"  {qualified:<32}: ERROR {str(exc)[:120]}")
     finally:
         conn.close()
 

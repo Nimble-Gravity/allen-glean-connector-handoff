@@ -78,6 +78,10 @@ class DbSettings:
 
     server: str
     database: str
+    # Default schema the in-scope views live in. The mock EMS uses "dbo"; the real
+    # Allen & Co Conference views may live in a "Conference" schema — set DB_SCHEMA.
+    # A ViewCatalogEntry may still override this per view.
+    schema: str = "dbo"
     port: int = 1433
     driver: str = "ODBC Driver 18 for SQL Server"
     auth_mode: str = AUTH_MODE_SQL
@@ -107,6 +111,7 @@ def load_db_settings() -> DbSettings:
     return DbSettings(
         server=_read_required_str_env("DB_SERVER"),
         database=_read_required_str_env("DB_NAME"),
+        schema=_read_str_env("DB_SCHEMA", default="dbo") or "dbo",
         port=int(_read_str_env("DB_PORT", default="1433") or "1433"),
         driver=_read_str_env("DB_DRIVER", default="ODBC Driver 18 for SQL Server"),
         auth_mode=auth_mode,
@@ -116,6 +121,42 @@ def load_db_settings() -> DbSettings:
         trust_server_certificate=_read_bool_env("DB_TRUST_SERVER_CERTIFICATE", default=False),
         host_name_in_certificate=_read_str_env("DB_HOST_NAME_IN_CERTIFICATE") or None,
         msi_client_id=_read_str_env("DB_MSI_CLIENT_ID") or _read_str_env("AZURE_CLIENT_ID"),
+    )
+
+
+@dataclass(frozen=True)
+class GroupsSettings:
+    """Source of user → AD/Entra group memberships, read from a SQL view.
+
+    Allen & Co exposes directory group membership as a SQL view in the same
+    read-only DB (the decided source — not Microsoft Graph). One row per
+    (user, group). ``load_source_users`` (main.py) queries it to populate each
+    ``GlobalUser.groups`` so documents get group-derived ACLs.
+
+    ``view`` empty → the feature is off: no groups view is queried and
+    ``load_source_users`` returns [] (dry runs then rely on superuser ACLs only).
+    """
+
+    view: str = ""  # DB_GROUPS_VIEW, e.g. "v_UserGroups"; empty disables the fetch
+    schema: str = "dbo"  # DB_GROUPS_SCHEMA; defaults to DB_SCHEMA
+    email_column: str = "Email"  # DB_GROUPS_EMAIL_COLUMN
+    group_column: str = "GroupName"  # DB_GROUPS_GROUP_COLUMN
+    name_column: str = ""  # DB_GROUPS_NAME_COLUMN (optional display name)
+
+
+def load_groups_settings() -> GroupsSettings:
+    """Read the AD/Entra groups-view settings from the environment.
+
+    The groups view lives in the same DB as the data views; its schema defaults to
+    DB_SCHEMA when DB_GROUPS_SCHEMA is unset.
+    """
+    default_schema = _read_str_env("DB_SCHEMA", default="dbo") or "dbo"
+    return GroupsSettings(
+        view=_read_str_env("DB_GROUPS_VIEW"),
+        schema=_read_str_env("DB_GROUPS_SCHEMA", default=default_schema) or default_schema,
+        email_column=_read_str_env("DB_GROUPS_EMAIL_COLUMN", default="Email") or "Email",
+        group_column=_read_str_env("DB_GROUPS_GROUP_COLUMN", default="GroupName") or "GroupName",
+        name_column=_read_str_env("DB_GROUPS_NAME_COLUMN"),
     )
 
 

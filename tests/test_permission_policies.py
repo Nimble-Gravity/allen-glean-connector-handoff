@@ -11,11 +11,25 @@ from glean_index.types.users import (
 )
 
 
-def test_all_document_kinds_denied_in_stub():
+def test_denied_when_no_allowed_groups_configured(monkeypatch):
+    monkeypatch.delenv("GLEAN_ALLOWED_GROUPS", raising=False)
     user = GlobalUser(datasource_user_id="id1", email="a@allenandco.com", groups=("EMS-Readers",))
-    # Skeleton denies by default until the AD/Entra rule is wired.
+    # Deny-by-default until GLEAN_ALLOWED_GROUPS names the reader group(s).
     for kind in IndexedDocumentKind:
         assert user_may_access_indexed_document(user, kind) is False
+
+
+def test_granted_when_user_in_an_allowed_group(monkeypatch):
+    monkeypatch.setenv("GLEAN_ALLOWED_GROUPS", "EMS-Readers, Analysts")
+    user = GlobalUser(datasource_user_id="id1", email="a@allenandco.com", groups=("EMS-Readers",))
+    for kind in IndexedDocumentKind:
+        assert user_may_access_indexed_document(user, kind) is True
+
+
+def test_denied_when_user_not_in_allowed_group(monkeypatch):
+    monkeypatch.setenv("GLEAN_ALLOWED_GROUPS", "Admins")
+    user = GlobalUser(datasource_user_id="id1", email="a@allenandco.com", groups=("EMS-Readers",))
+    assert user_may_access_indexed_document(user, IndexedDocumentKind.COMPANY) is False
 
 
 def test_global_user_carries_groups():

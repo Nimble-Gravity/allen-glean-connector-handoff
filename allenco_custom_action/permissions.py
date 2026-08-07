@@ -2,34 +2,90 @@
 
 Intentionally does not import from src/ to avoid the Glean SDK dependency.
 
-⚠️ SKELETON STUB. SMART sourced per-view access from a SQL ViewPermissions table
-(`[GleanSMART].[dbo].[ViewPermissions]`). Allen & Co derives access from Active
-Directory / Entra ID groups instead — the concrete source (Microsoft Graph vs a
-SQL view mirroring AD groups) is an open decision (see CLAUDE.md → "Open
-questions"). Until it is wired, the permission cache is empty and only superusers
-(GLEAN_INDEXING_SUPERUSER_ALLOWED_USERS) pass; every other user is denied.
+Allen & Co derives view access from Active Directory / Entra ID groups exposed as a
+**SQL view** in the EMS DB (the decided source — not Microsoft Graph; mirrors the
+indexer's allenco_connector.groups). The view maps (EMS view name → allowed user
+email), one row per grant. It is configured via env (see load_view_permissions_cache)
+and is **opt-in**: when DB_VIEW_PERMISSIONS_VIEW is unset the cache is empty, the API
+boots without touching the DB, and only superusers
+(GLEAN_INDEXING_SUPERUSER_ALLOWED_USERS) pass — every other user is denied.
 """
 
 import json
 import logging
 import os
+from collections.abc import Callable
+
+from validators import SAFE_IDENTIFIER
 
 logger = logging.getLogger(__name__)
 
 PERMISSION_DENIED_MESSAGE = "The user does not have permission to access this view."
 
 
-def load_view_permissions_cache() -> dict[str, list[str]]:
-    """Return {lowercase_view_name: [allowed_emails]} — currently an empty stub.
+def load_view_permissions_cache(
+    connect: Callable[[], object] | None = None,
+) -> dict[str, list[str]]:
+    """Return {lowercase_view_name: [allowed_emails]} from the SQL permissions view.
 
-    TODO Allen & Co: populate from AD/Entra group membership (Graph or a SQL view
-    that mirrors AD groups). Called once at API startup.
+    Env configuration ("connectivity is configuration, not code"):
+      DB_VIEW_PERMISSIONS_VIEW          the view name (empty → feature off, empty cache)
+      DB_VIEW_PERMISSIONS_SCHEMA        schema (default: DB_SCHEMA, else dbo)
+      DB_VIEW_PERMISSIONS_VIEW_COLUMN   column holding the EMS view name (default ViewName)
+      DB_VIEW_PERMISSIONS_EMAIL_COLUMN  column holding the user email (default Email)
+
+    Identifiers are validated against SAFE_IDENTIFIER and bracket-quoted before use.
+    ``connect`` is an optional connection factory (for tests); production opens a
+    pooled connection via db.get_connection. Called once at API startup.
     """
-    logger.warning(
-        "load_view_permissions_cache: AD/Entra permission source not yet wired — "
-        "returning empty cache (only superusers will pass view-access checks)."
+    view = (os.environ.get("DB_VIEW_PERMISSIONS_VIEW") or "").strip()
+    if not view:
+        logger.warning(
+            "load_view_permissions_cache: SQL permissions view not configured "
+            "(DB_VIEW_PERMISSIONS_VIEW empty) — empty cache (only superusers pass)."
+        )
+        return {}
+
+    schema = (
+        os.environ.get("DB_VIEW_PERMISSIONS_SCHEMA") or os.environ.get("DB_SCHEMA") or "dbo"
+    ).strip()
+    view_col = (os.environ.get("DB_VIEW_PERMISSIONS_VIEW_COLUMN") or "ViewName").strip()
+    email_col = (os.environ.get("DB_VIEW_PERMISSIONS_EMAIL_COLUMN") or "Email").strip()
+    for ident, kind in (
+        (schema, "schema"),
+        (view, "view name"),
+        (view_col, "view column"),
+        (email_col, "email column"),
+    ):
+        if not SAFE_IDENTIFIER.match(ident):
+            raise ValueError(f"Unsafe {kind} '{ident}' in view-permissions config.")
+
+    if connect is None:
+        from db import get_connection
+        from settings import load_db_settings
+
+        def connect() -> object:
+            return get_connection(load_db_settings())
+
+    conn = connect()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(f"SELECT [{view_col}], [{email_col}] FROM [{schema}].[{view}]")
+        cache: dict[str, list[str]] = {}
+        for row in cursor.fetchall():
+            view_name = str(row[0]).strip().lower() if row[0] is not None else ""
+            email = str(row[1]).strip().lower() if row[1] is not None else ""
+            if view_name and email:
+                cache.setdefault(view_name, []).append(email)
+    finally:
+        conn.close()
+    logger.info(
+        "Loaded view-permission entries for %d view(s) from [%s].[%s].",
+        len(cache),
+        schema,
+        view,
     )
-    return {}
+    return cache
 
 
 def load_superuser_emails() -> frozenset[str]:

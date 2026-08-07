@@ -17,13 +17,17 @@ import pyodbc
 from dotenv import load_dotenv
 
 from allenco_connector.db_connection import get_connection
+from allenco_connector.groups import load_users_with_groups
 from allenco_connector.sync_state import build_sync_state_store
-from allenco_connector.views.registry import EMS_VIEWS
+from allenco_connector.views.catalog import VIEW_CATALOG
+from allenco_connector.views.registry import build_view_specs
 from config.config import (
     ConnectorSettings,
+    GroupsSettings,
     configure_logging,
     load_connector_settings,
     load_db_settings,
+    load_groups_settings,
 )
 from glean_index.env_superusers import (
     extend_permissions_users_for_superusers,
@@ -65,16 +69,19 @@ class _AlreadyNotified(Exception):
         self.cause = cause
 
 
-def load_source_users() -> list[GlobalUser]:
-    """Load users + their AD/Entra ID group memberships from the source.
+def load_source_users(
+    conn: pyodbc.Connection | None,
+    groups_settings: GroupsSettings,
+) -> list[GlobalUser]:
+    """Load users + their AD/Entra group memberships from the SQL groups view.
 
-    TODO Allen & Co: implement the real fetch (Microsoft Graph or a SQL view that
-    mirrors AD groups — see CLAUDE.md "Open questions"). Populate each GlobalUser's
-    ``groups`` so glean_index.permission_policies can gate document access.
-    Returns an empty list until implemented.
+    Allen & Co's decided source is a read-only SQL view mirroring directory groups
+    (config.GroupsSettings / DB_GROUPS_VIEW). Each GlobalUser's ``groups`` gate
+    document access (glean_index.permission_policies). Returns [] when the view is
+    unconfigured or the DB is unreachable (dry run) — the run then relies on
+    superuser ACLs only.
     """
-    logger.info("load_source_users: not yet implemented, returning empty list.")
-    return []
+    return load_users_with_groups(conn, groups_settings)
 
 
 def main() -> int:
@@ -130,21 +137,6 @@ def _run(
     # full_refresh forces a complete re-index and resets watermarks to the new max.
     use_incremental = sync_store.incremental and not full_refresh
 
-    # Users + permissions (AD/Entra). Skeleton: load_source_users() returns [].
-    global_users = load_source_users()
-    indexing_superusers = load_indexing_superusers_from_json(
-        settings.glean_indexing_superuser_allowed_users_json
-    )
-    allowed_refs = merge_allowed_user_references(
-        build_allowed_user_references(global_users),
-        [s.as_user_reference() for s in indexing_superusers],
-    )
-    users_for_permissions = extend_permissions_users_for_superusers(
-        build_users_for_permissions_indexing(global_users),
-        global_datasource_user_ids={u.datasource_user_id for u in global_users},
-        superusers=indexing_superusers,
-    )
-
     # Glean prerequisites (only strictly required when actually indexing).
     datasource = settings.glean_datasource.strip()
     glean_cfg = None
@@ -158,6 +150,7 @@ def _run(
     # Connect to the Azure SQL MI. A dry run (indexing disabled) tolerates an
     # unreachable DB so the doc-building/export wiring can be validated offline.
     db_settings = load_db_settings()
+    groups_settings = load_groups_settings()
     try:
         conn = get_connection(db_settings)
     except pyodbc.Error as exc:
@@ -171,10 +164,28 @@ def _run(
         )
         conn = None
 
+    # Users + permissions (AD/Entra). Source users come from the SQL groups view
+    # (config.GroupsSettings); superusers come from env. This needs the DB
+    # connection, so it runs after connect — [] when the groups view is
+    # unconfigured or the DB is unreachable (dry run), leaving superuser ACLs only.
+    global_users = load_source_users(conn, groups_settings)
+    indexing_superusers = load_indexing_superusers_from_json(
+        settings.glean_indexing_superuser_allowed_users_json
+    )
+    allowed_refs = merge_allowed_user_references(
+        build_allowed_user_references(global_users),
+        [s.as_user_reference() for s in indexing_superusers],
+    )
+    users_for_permissions = extend_permissions_users_for_superusers(
+        build_users_for_permissions_indexing(global_users),
+        global_datasource_user_ids={u.datasource_user_id for u in global_users},
+        superusers=indexing_superusers,
+    )
+
     documents: list = []
     if conn is not None:
         try:
-            for spec in EMS_VIEWS:
+            for spec in build_view_specs(VIEW_CATALOG, default_schema=db_settings.schema):
                 since = sync_state.watermark_for(spec.view_name) if use_incremental else None
                 logger.info(
                     "Fetching %s (%s).",
