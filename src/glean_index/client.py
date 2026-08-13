@@ -9,12 +9,34 @@ from glean.api_client.utils.retries import BackoffStrategy, RetryConfig
 MAX_INDEX_DOCUMENTS_PAGE_SIZE = 500
 
 
+def _normalize_instance(value: str) -> str:
+    """Return the bare Glean instance name, tolerating a pasted full URL.
+
+    The SDK builds the server URL from the instance NAME (``https://<name>-be.glean.com``),
+    so a full URL must be reduced first, e.g.
+    ``https://ed1d9232-be.glean.com/api/index/v1/`` -> ``ed1d9232``. A bare name is
+    returned unchanged.
+    """
+    v = (value or "").strip()
+    if "://" in v:
+        v = v.split("://", 1)[1]
+    v = v.split("/", 1)[0]  # host only, drop any path
+    for suffix in ("-be.glean.com", ".glean.com"):
+        if v.endswith(suffix):
+            return v[: -len(suffix)]
+    return v
+
+
 @dataclass(frozen=True)
 class GleanConfig:
     """Configuration required to call the Glean Indexing API."""
 
     instance: str
     indexing_api_key: str
+
+    def __post_init__(self) -> None:
+        # Tolerate a full URL pasted into GLEAN_INSTANCE — reduce it to the name.
+        object.__setattr__(self, "instance", _normalize_instance(self.instance))
 
     @staticmethod
     def from_env() -> "GleanConfig":
