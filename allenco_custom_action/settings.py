@@ -16,11 +16,12 @@ from dotenv import load_dotenv
 # over the file — a .env must never clobber values already present in os.environ.
 load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env", override=False)
 
-# Azure SQL authentication modes (mirror of config.config).
+# SQL authentication modes (mirror of config.config).
 AUTH_MODE_SQL = "sql"
 AUTH_MODE_MSI = "msi"
 AUTH_MODE_DEFAULT = "default"
-VALID_AUTH_MODES = frozenset({AUTH_MODE_SQL, AUTH_MODE_MSI, AUTH_MODE_DEFAULT})
+AUTH_MODE_WINDOWS = "windows"  # Windows Authentication (Trusted_Connection=yes)
+VALID_AUTH_MODES = frozenset({AUTH_MODE_SQL, AUTH_MODE_MSI, AUTH_MODE_DEFAULT, AUTH_MODE_WINDOWS})
 
 
 @dataclass(frozen=True)
@@ -61,7 +62,9 @@ def load_db_settings() -> DbSettings:
         server=_read_required_str_env("DB_SERVER"),
         database=_read_required_str_env("DB_NAME"),
         schema=_read_str_env("DB_SCHEMA", default="dbo") or "dbo",
-        port=int(_read_str_env("DB_PORT", default="1433") or "1433"),
+        # DB_PORT=0 omits the port (SERVER=host) so the driver can resolve a default
+        # or named instance from the host alone.
+        port=_read_int_env("DB_PORT", default=1433),
         driver=_read_str_env("DB_DRIVER", default="ODBC Driver 18 for SQL Server"),
         auth_mode=auth_mode,
         user=user,
@@ -91,6 +94,16 @@ def _read_bool_env(key: str, *, default: bool) -> bool:
     if raw in ("0", "false", "no"):
         return False
     return default
+
+
+def _read_int_env(key: str, *, default: int) -> int:
+    raw = (os.environ.get(key) or "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
 
 
 def _read_required_str_env(key: str) -> str:

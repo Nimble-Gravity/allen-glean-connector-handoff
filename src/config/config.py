@@ -13,11 +13,13 @@ from pathlib import Path
 
 from glean_index.client import GleanConfig
 
-# Supported Azure SQL authentication modes (see DbSettings.auth_mode).
+# Supported SQL authentication modes (see DbSettings.auth_mode).
 AUTH_MODE_SQL = "sql"  # SQL login (UID/PWD) — dev phase
 AUTH_MODE_MSI = "msi"  # Managed identity (Authentication=ActiveDirectoryMsi) — Azure prod
 AUTH_MODE_DEFAULT = "default"  # Authentication=ActiveDirectoryDefault (az-login / env / MSI chain)
-VALID_AUTH_MODES = frozenset({AUTH_MODE_SQL, AUTH_MODE_MSI, AUTH_MODE_DEFAULT})
+# Windows Authentication (Trusted_Connection=yes) — domain-joined SQL Server.
+AUTH_MODE_WINDOWS = "windows"
+VALID_AUTH_MODES = frozenset({AUTH_MODE_SQL, AUTH_MODE_MSI, AUTH_MODE_DEFAULT, AUTH_MODE_WINDOWS})
 
 
 @dataclass(frozen=True)
@@ -73,11 +75,21 @@ class DbSettings:
         - "sql"     → SQL login (UID/PWD). Used during the dev phase.
         - "msi"     → Managed identity (Authentication=ActiveDirectoryMsi). Azure prod.
         - "default" → Authentication=ActiveDirectoryDefault (az-login / env / MSI chain).
+        - "windows" → Windows Authentication (Trusted_Connection=yes). No UID/PWD:
+                      the process runs as a Windows principal that has DB access.
+                      For a domain-joined SQL Server (e.g. SQL Server on an Azure VM),
+                      matching SSMS's "Windows Authentication" option.
 
-    TLS: Azure SQL MI presents a real, validatable certificate, so keep
-    ``trust_server_certificate=False``. Set ``host_name_in_certificate`` only when
+    TLS: Azure SQL MI presents a real, validatable certificate, so for MI keep
+    ``encrypt=True`` + ``trust_server_certificate=False``. A domain-joined SQL Server
+    may only have a self-signed cert and allow *optional* encryption — mirror SSMS's
+    "Encryption: Optional" with ``encrypt=False`` (or keep encryption on and set
+    ``trust_server_certificate=True``). Set ``host_name_in_certificate`` only when
     connecting through a local tunnel (Option B2), where the driver dials
-    ``127.0.0.1`` but must still validate the MI's real certificate name.
+    ``127.0.0.1`` but must still validate the server's real certificate name.
+
+    port: appended to SERVER as ``SERVER=host,port``. Set to 0 to omit the port and
+    let the driver resolve a default instance / named instance from the host alone.
     """
 
     server: str
@@ -116,7 +128,9 @@ def load_db_settings() -> DbSettings:
         server=_read_required_str_env("DB_SERVER"),
         database=_read_required_str_env("DB_NAME"),
         schema=_read_str_env("DB_SCHEMA", default="dbo") or "dbo",
-        port=int(_read_str_env("DB_PORT", default="1433") or "1433"),
+        # DB_PORT=0 omits the port (SERVER=host) so the driver can resolve a default
+        # or named instance from the host alone.
+        port=_read_int_env("DB_PORT", default=1433),
         driver=_read_str_env("DB_DRIVER", default="ODBC Driver 18 for SQL Server"),
         auth_mode=auth_mode,
         user=user,

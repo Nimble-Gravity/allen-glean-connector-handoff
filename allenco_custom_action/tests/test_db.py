@@ -5,7 +5,13 @@ in sync (same TLS + auth-mode behaviour).
 """
 
 from db import build_connection_string
-from settings import AUTH_MODE_DEFAULT, AUTH_MODE_MSI, AUTH_MODE_SQL, DbSettings
+from settings import (
+    AUTH_MODE_DEFAULT,
+    AUTH_MODE_MSI,
+    AUTH_MODE_SQL,
+    AUTH_MODE_WINDOWS,
+    DbSettings,
+)
 
 
 def _settings(**overrides) -> DbSettings:
@@ -44,3 +50,22 @@ def test_msi_user_assigned_appends_client_id():
 def test_default_auth_uses_active_directory_default():
     cs = build_connection_string(_settings(auth_mode=AUTH_MODE_DEFAULT, user="", password=""))
     assert "Authentication=ActiveDirectoryDefault;" in cs
+
+
+def test_windows_auth_uses_trusted_connection():
+    cs = build_connection_string(_settings(auth_mode=AUTH_MODE_WINDOWS, user="", password=""))
+    assert "Trusted_Connection=yes;" in cs
+    assert "UID=" not in cs
+    assert "PWD=" not in cs
+    assert "Authentication=" not in cs
+
+
+def test_encryption_optional_emits_encrypt_no():
+    cs = build_connection_string(_settings(encrypt=False))
+    assert "Encrypt=no;" in cs
+
+
+def test_port_zero_omits_port_from_server():
+    cs = build_connection_string(_settings(server="ALC-AZR-SQL-001", port=0))
+    assert "SERVER=ALC-AZR-SQL-001;" in cs
+    assert "ALC-AZR-SQL-001,0" not in cs

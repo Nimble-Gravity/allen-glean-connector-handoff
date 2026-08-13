@@ -20,7 +20,7 @@ import pyodbc
 # Enable ODBC-level connection pooling. Must be set before the first connect().
 pyodbc.pooling = True
 
-from settings import AUTH_MODE_MSI, AUTH_MODE_SQL, DbSettings  # noqa: E402
+from settings import AUTH_MODE_MSI, AUTH_MODE_SQL, AUTH_MODE_WINDOWS, DbSettings  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -35,9 +35,11 @@ def build_connection_string(settings: DbSettings) -> str:
     Mirror of allenco_connector.db_connection.build_connection_string. See
     settings.DbSettings for the auth_mode / TLS semantics.
     """
+    # port=0 → omit ",port" so the driver resolves a default/named instance by host.
+    server = f"{settings.server},{settings.port}" if settings.port else settings.server
     parts = [
         f"DRIVER={{{settings.driver}}};",
-        f"SERVER={settings.server},{settings.port};",
+        f"SERVER={server};",
         f"DATABASE={settings.database};",
         f"Encrypt={'yes' if settings.encrypt else 'no'};",
         f"TrustServerCertificate={'yes' if settings.trust_server_certificate else 'no'};",
@@ -49,6 +51,10 @@ def build_connection_string(settings: DbSettings) -> str:
     if mode == AUTH_MODE_SQL:
         parts.append(f"UID={settings.user};")
         parts.append(f"PWD={settings.password};")
+    elif mode == AUTH_MODE_WINDOWS:
+        # Windows Authentication (SSPI/Kerberos): connect as the OS process identity.
+        # No UID/PWD — the process must run as a Windows principal with DB access.
+        parts.append("Trusted_Connection=yes;")
     elif mode == AUTH_MODE_MSI:
         parts.append("Authentication=ActiveDirectoryMsi;")
         # A USER-assigned managed identity must be selected by its client id;

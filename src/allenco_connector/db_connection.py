@@ -19,7 +19,7 @@ import time
 
 import pyodbc
 
-from config.config import AUTH_MODE_MSI, AUTH_MODE_SQL, DbSettings
+from config.config import AUTH_MODE_MSI, AUTH_MODE_SQL, AUTH_MODE_WINDOWS, DbSettings
 
 logger = logging.getLogger(__name__)
 
@@ -35,21 +35,28 @@ def build_connection_string(settings: DbSettings) -> str:
     public) — only the SERVER host and the TLS/auth fields differ, and those come
     from DbSettings. See config.DbSettings for the auth_mode / TLS semantics.
     """
+    # port=0 → omit ",port" so the driver resolves a default/named instance by host.
+    server = f"{settings.server},{settings.port}" if settings.port else settings.server
     parts = [
         f"DRIVER={{{settings.driver}}};",
-        f"SERVER={settings.server},{settings.port};",
+        f"SERVER={server};",
         f"DATABASE={settings.database};",
         f"Encrypt={'yes' if settings.encrypt else 'no'};",
         f"TrustServerCertificate={'yes' if settings.trust_server_certificate else 'no'};",
     ]
     if settings.host_name_in_certificate:
-        # Tunnel (Option B2): dial 127.0.0.1 but validate the MI's real cert name.
+        # Tunnel (Option B2): dial 127.0.0.1 but validate the server's real cert name.
         parts.append(f"HostNameInCertificate={settings.host_name_in_certificate};")
 
     mode = settings.auth_mode.lower()
     if mode == AUTH_MODE_SQL:
         parts.append(f"UID={settings.user};")
         parts.append(f"PWD={settings.password};")
+    elif mode == AUTH_MODE_WINDOWS:
+        # Windows Authentication (SSPI/Kerberos): connect as the OS process identity.
+        # No UID/PWD — the connector must run as a Windows principal with DB access
+        # (native on a domain-joined Windows host; needs a Kerberos keytab elsewhere).
+        parts.append("Trusted_Connection=yes;")
     elif mode == AUTH_MODE_MSI:
         parts.append("Authentication=ActiveDirectoryMsi;")
         # A USER-assigned managed identity must be selected by its client id;

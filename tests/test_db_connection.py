@@ -5,6 +5,7 @@ from config.config import (
     AUTH_MODE_DEFAULT,
     AUTH_MODE_MSI,
     AUTH_MODE_SQL,
+    AUTH_MODE_WINDOWS,
     DbSettings,
 )
 
@@ -63,3 +64,25 @@ def test_host_name_in_certificate_added_when_tunneling():
 def test_trust_server_certificate_toggle():
     cs = build_connection_string(_settings(trust_server_certificate=True))
     assert "TrustServerCertificate=yes;" in cs
+
+
+def test_windows_auth_uses_trusted_connection():
+    # Windows Authentication (domain-joined SQL Server): identity comes from the OS
+    # process, so no UID/PWD and no ActiveDirectory* Authentication keyword.
+    cs = build_connection_string(_settings(auth_mode=AUTH_MODE_WINDOWS, user="", password=""))
+    assert "Trusted_Connection=yes;" in cs
+    assert "UID=" not in cs
+    assert "PWD=" not in cs
+    assert "Authentication=" not in cs
+
+
+def test_encryption_optional_emits_encrypt_no():
+    # SSMS "Encryption: Optional" ↔ Encrypt=no on the client side.
+    cs = build_connection_string(_settings(encrypt=False))
+    assert "Encrypt=no;" in cs
+
+
+def test_port_zero_omits_port_from_server():
+    cs = build_connection_string(_settings(server="ALC-AZR-SQL-001", port=0))
+    assert "SERVER=ALC-AZR-SQL-001;" in cs
+    assert "ALC-AZR-SQL-001,0" not in cs
