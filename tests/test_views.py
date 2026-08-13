@@ -17,14 +17,14 @@ def test_builds_one_document_per_row():
     docs = rows_to_documents(
         df,
         object_type="attendee",
-        datasource="allenco_ems",
+        datasource="allencoems",
         id_column="AttendeeID",
         title_columns=("FirstName", "LastName"),
     )
     assert len(docs) == 2
     assert docs[0].id == "attendee:1"  # id is namespaced by object_type
     assert docs[0].title == "Ada – Lovelace"
-    assert docs[0].datasource == "allenco_ems"
+    assert docs[0].datasource == "allencoems"
 
 
 def test_missing_id_column_falls_back_to_position():

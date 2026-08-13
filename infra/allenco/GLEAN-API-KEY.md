@@ -9,7 +9,7 @@ Gravity **securely** (see Step 4).*
 
 | Item | Becomes the config value | Where it comes from |
 |---|---|---|
-| A **custom datasource** | `GLEAN_DATASOURCE` (`allenco_ems`) | you create it (Step 1) |
+| A **custom datasource** | `GLEAN_DATASOURCE` (`allencoems`) | you create it (Step 1) |
 | An **Indexing API token** | `GLEAN_INDEXING_API_KEY` | you generate it (Step 2) |
 | Your **instance name** | `GLEAN_INSTANCE` | your Glean subdomain (Step 3) |
 
@@ -26,7 +26,7 @@ and **Publish**. Recommended values:
 
 | Field | Value | Notes |
 |---|---|---|
-| **name** | `allenco_ems` | The unique datasource id. Must match the connector's `GLEAN_DATASOURCE` **exactly** — please keep this value. |
+| **name** | `allencoems` | The unique datasource id. ⚠️ **Alphanumeric only** — Glean rejects underscores/hyphens/spaces (e.g. `allenco_ems` is invalid). Must match the connector's `GLEAN_DATASOURCE` **exactly**. |
 | **displayName** | e.g. `Allen & Co EMS` | What users see in search results. |
 | **datasourceCategory** | `CRM` | Best fit for EMS (attendees, companies, participation = relationship/customer data). Glean requires a category — it cannot be left `UNCATEGORIZED`. |
 | **urlRegex** | `https://<ems-host>/.*` — **confirm the EMS host** | Required. A regex that must match the **view URL** the connector stamps on each record. Tell NG whether EMS records have their own web URL and on what host; the pattern and the connector's URL are then set together. |
@@ -94,7 +94,7 @@ email or chat):
 |---|---|
 | the Indexing API token from Step 2 | `GLEAN_INDEXING_API_KEY` |
 | your instance name from Step 3 | `GLEAN_INSTANCE` |
-| the datasource name (`allenco_ems`) | `GLEAN_DATASOURCE` |
+| the datasource name (`allencoems`) | `GLEAN_DATASOURCE` |
 
 In production these live in Allen & Co's **Key Vault** (as the secret `glean-indexing-api-key`);
 during development they go into the connector's `.env` on the dev machine.

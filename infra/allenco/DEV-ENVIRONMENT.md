@@ -129,7 +129,7 @@ Verify the Glean push end-to-end **without flooding Glean or over-exposing PII**
 ```
 GLEAN_INSTANCE=<instance>
 GLEAN_INDEXING_API_KEY=<token>
-GLEAN_DATASOURCE=allenco_ems
+GLEAN_DATASOURCE=allencoems
 GLEAN_INDEXING_SUPERUSER_ALLOWED_USERS=["<your-glean-email>"]   # so you can SEE the docs in Glean
 FETCH_ROW_LIMIT=25            # ~25 rows x 11 views ~= 275 docs
 GLEAN_FULL_REFRESH=true       # datasource = exactly this batch (replaceable)
@@ -141,7 +141,7 @@ GLEAN_ENABLE_INDEXING=false   # start with a dry run (step 1)
 1. **Dry run first** — `$env:PYTHONPATH="src"; python -m main` → inspect `.outputs\ems_documents_*.json`:
    ~275 docs across 11 types, sensible titles, and the `EXCLUDE_COLUMNS` fields absent from the body.
 2. **Live push** — set `GLEAN_ENABLE_INDEXING=true`, run `python -m main`. Expect a log line
-   `Starting Glean indexing. datasource=allenco_ems mode=full_refresh ... documents=~275` and
+   `Starting Glean indexing. datasource=allencoems mode=full_refresh ... documents=~275` and
    `ok=True`. (⚠️ The connector warns if indexing is on with `FETCH_ROW_LIMIT=0` — that would push
    EVERY row; keep the cap for the test.)
 3. **Verify in Glean** — signed in as the superuser email, search a known attendee/activity: the
