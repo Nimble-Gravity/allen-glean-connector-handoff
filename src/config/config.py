@@ -46,6 +46,10 @@ class ConnectorSettings:
     # for a fast dry-run sample or to cap very large views.
     fetch_row_limit: int = 0
 
+    # Columns dropped from every document body (EXCLUDE_COLUMNS, comma-separated) —
+    # e.g. PII fields not cleared for indexing. Empty = keep all columns.
+    exclude_columns: tuple[str, ...] = ()
+
     def require_glean_indexing_prereqs(self) -> tuple[str, GleanConfig]:
         """Return (datasource, glean_config). Raises ValueError if misconfigured."""
         datasource = self.glean_datasource.strip()
@@ -192,6 +196,7 @@ def load_connector_settings() -> ConnectorSettings:
         log_debug=_read_bool_env("LOG_DEBUG", default=False),
         debug_files=_read_bool_env("DEBUG_FILES", default=False),
         fetch_row_limit=max(0, _read_int_env("FETCH_ROW_LIMIT", default=0)),
+        exclude_columns=_read_csv_env("EXCLUDE_COLUMNS"),
     )
 
 
@@ -257,6 +262,13 @@ def _read_bool_env(key: str, *, default: bool) -> bool:
     if raw in ("0", "false", "no"):
         return False
     return default
+
+
+def _read_csv_env(key: str) -> tuple[str, ...]:
+    raw = (os.environ.get(key) or "").strip()
+    if not raw:
+        return ()
+    return tuple(part.strip() for part in raw.split(",") if part.strip())
 
 
 def _read_int_env(key: str, *, default: int) -> int:

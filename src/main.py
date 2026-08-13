@@ -188,6 +188,17 @@ def _run(
             settings.fetch_row_limit,
             settings.fetch_row_limit,
         )
+    elif glean_enabled:
+        logger.warning(
+            "GLEAN_ENABLE_INDEXING=true with NO FETCH_ROW_LIMIT — this will push EVERY "
+            "row of every view (potentially millions). Set FETCH_ROW_LIMIT for a bounded run."
+        )
+    if settings.exclude_columns:
+        logger.info(
+            "EXCLUDE_COLUMNS — dropping %d column(s) from document bodies: %s",
+            len(settings.exclude_columns),
+            ", ".join(settings.exclude_columns),
+        )
 
     documents: list = []
     if conn is not None:
@@ -196,6 +207,7 @@ def _run(
                 VIEW_CATALOG,
                 default_schema=db_settings.schema,
                 row_limit=settings.fetch_row_limit,
+                exclude_columns=settings.exclude_columns,
             ):
                 since = sync_state.watermark_for(spec.view_name) if use_incremental else None
                 logger.info(

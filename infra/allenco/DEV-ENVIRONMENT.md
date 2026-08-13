@@ -119,6 +119,39 @@ that mirrors the directory. Until then, documents carry only superuser ACLs
 
 ---
 
+## Controlled live-indexing test (small, replaceable batch)
+
+Verify the Glean push end-to-end **without flooding Glean or over-exposing PII**. Uses a row cap
++ a full-refresh (so the datasource ends up as exactly the test batch) + column redaction.
+
+**`.env`** (on top of the working DB credentials):
+
+```
+GLEAN_INSTANCE=<instance>
+GLEAN_INDEXING_API_KEY=<token>
+GLEAN_DATASOURCE=allenco_ems
+GLEAN_INDEXING_SUPERUSER_ALLOWED_USERS=["<your-glean-email>"]   # so you can SEE the docs in Glean
+FETCH_ROW_LIMIT=25            # ~25 rows x 11 views ~= 275 docs
+GLEAN_FULL_REFRESH=true       # datasource = exactly this batch (replaceable)
+EXCLUDE_COLUMNS=DOB,LicenseNumber,LicenseExpirationDate,LicenseDOB,DietaryAllergyComments,RSVPDietaryAllergyComments
+SYNC_STATE_BACKEND=none
+GLEAN_ENABLE_INDEXING=false   # start with a dry run (step 1)
+```
+
+1. **Dry run first** — `$env:PYTHONPATH="src"; python -m main` → inspect `.outputs\ems_documents_*.json`:
+   ~275 docs across 11 types, sensible titles, and the `EXCLUDE_COLUMNS` fields absent from the body.
+2. **Live push** — set `GLEAN_ENABLE_INDEXING=true`, run `python -m main`. Expect a log line
+   `Starting Glean indexing. datasource=allenco_ems mode=full_refresh ... documents=~275` and
+   `ok=True`. (⚠️ The connector warns if indexing is on with `FETCH_ROW_LIMIT=0` — that would push
+   EVERY row; keep the cap for the test.)
+3. **Verify in Glean** — signed in as the superuser email, search a known attendee/activity: the
+   document should appear with the right title/body; a non-superuser must NOT see it (deny-by-default
+   until the groups view is wired).
+4. **Iterate** — `full_refresh` means the next run replaces the batch. Do the real (uncapped, scoped)
+   index only once the client confirms scope / PII / PKs.
+
+---
+
 ## Outbound network this machine needs (for development)
 
 HTTPS (443) to:

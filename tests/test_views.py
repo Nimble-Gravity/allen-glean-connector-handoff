@@ -58,3 +58,19 @@ def test_jsonable_coerces_timestamp_nan_and_none():
     assert _jsonable(float("nan")) is None
     assert _jsonable(None) is None
     assert _jsonable("plain") == "plain"
+
+
+def test_exclude_columns_dropped_from_body_case_insensitive():
+    df = pd.DataFrame([{"AttendeeID": 1, "DOB": "1990-01-01", "FirstName": "Ada"}])
+    docs = rows_to_documents(
+        df,
+        object_type="attendee",
+        datasource="ds",
+        id_column="AttendeeID",
+        title_columns=("FirstName",),
+        exclude_columns=("dob",),  # case-insensitive
+    )
+    body = json.loads(docs[0].body.text_content)
+    assert "DOB" not in body  # sensitive column redacted
+    assert body["FirstName"] == "Ada"
+    assert body["AttendeeID"] == 1

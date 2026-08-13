@@ -1,5 +1,7 @@
 """Tests for the declarative view catalog and the catalog-driven registry."""
 
+import json
+
 import pandas as pd
 
 from allenco_connector.views import registry as reg
@@ -86,3 +88,12 @@ def test_row_limit_adds_select_top(monkeypatch):
     (spec2,) = build_view_specs([entry], default_schema="cnf", row_limit=0)
     spec2.fetch(conn=None)
     assert "TOP" not in cap["sql"]
+
+
+def test_build_view_specs_propagates_exclude_columns():
+    entry = ViewCatalogEntry(view_name="v_Company", object_type="company", id_column="CompanyID")
+    (spec,) = build_view_specs([entry], default_schema="cnf", exclude_columns=("Secret",))
+    df = pd.DataFrame([{"CompanyID": 1, "Secret": "x", "CompanyName": "Acme"}])
+    body = json.loads(spec.build(df, datasource="ds")[0].body.text_content)
+    assert "Secret" not in body
+    assert body["CompanyName"] == "Acme"

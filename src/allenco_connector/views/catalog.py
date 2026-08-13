@@ -162,9 +162,10 @@ VIEW_CATALOG: tuple[ViewCatalogEntry, ...] = (
 )
 
 
-def _generic_builder(entry: ViewCatalogEntry) -> BuildFn:
+def _generic_builder(entry: ViewCatalogEntry, exclude_columns: tuple[str, ...] = ()) -> BuildFn:
     """Return a build function that maps this view's rows via rows_to_documents.
 
+    ``exclude_columns`` (from EXCLUDE_COLUMNS) are dropped from every document body.
     Imported lazily to avoid a circular import (registry ← catalog ← _common).
     """
     from allenco_connector.views._common import rows_to_documents
@@ -182,11 +183,16 @@ def _generic_builder(entry: ViewCatalogEntry) -> BuildFn:
             id_column=entry.id_column,
             title_columns=entry.title_columns,
             allowed_users=allowed_users,
+            exclude_columns=exclude_columns,
         )
 
     return build
 
 
-def builder_for(entry: ViewCatalogEntry) -> BuildFn:
-    """The entry's custom builder if set, else the generic row→document mapping."""
-    return entry.build if entry.build is not None else _generic_builder(entry)
+def builder_for(entry: ViewCatalogEntry, exclude_columns: tuple[str, ...] = ()) -> BuildFn:
+    """The entry's custom builder if set, else the generic row→document mapping.
+
+    A custom ``build`` handles its own shaping; ``exclude_columns`` applies only to
+    the generic mapping.
+    """
+    return entry.build if entry.build is not None else _generic_builder(entry, exclude_columns)
