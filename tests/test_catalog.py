@@ -17,9 +17,17 @@ def test_default_schema_inherited_when_entry_unset():
 
 def test_real_catalog_pins_cnf_schema():
     specs = build_view_specs(VIEW_CATALOG, default_schema="dbo")
-    assert len(specs) == len(VIEW_CATALOG)
+    enabled = [e for e in VIEW_CATALOG if e.enabled]
+    assert len(specs) == len(enabled)
     # the Conference catalog pins schema="cnf" on every entry, so DB_SCHEMA is moot.
     assert all(s.schema == "cnf" for s in specs)
+
+
+def test_build_view_specs_skips_disabled_entries():
+    on = ViewCatalogEntry(view_name="v_on", object_type="on", id_column="ID")
+    off = ViewCatalogEntry(view_name="v_off", object_type="off", id_column="ID", enabled=False)
+    specs = build_view_specs([on, off], default_schema="cnf")
+    assert [s.view_name for s in specs] == ["v_on"]
 
 
 def test_entry_schema_overrides_default():

@@ -61,6 +61,7 @@ class ViewCatalogEntry:
     title_columns: tuple[str, ...] = ()
     watermark_column: str | None = "ModifiedDate"
     schema: str | None = None
+    enabled: bool = True  # False → skipped by build_view_specs (not fetched/indexed)
     build: BuildFn | None = field(default=None, compare=False)
 
 
@@ -83,6 +84,10 @@ VIEW_CATALOG: tuple[ViewCatalogEntry, ...] = (
         title_columns=("FirstName", "LastName"),
         watermark_column=None,
         schema="cnf",
+        # DISABLED: ~8M rows and a complex view, so SELECT TOP (N) does NOT short-
+        # circuit — a fetch materializes the whole thing and hangs. Re-enable once the
+        # client confirms the granularity/event filter for this view (scope question).
+        enabled=False,
     ),
     ViewCatalogEntry(
         view_name="v_AttendeeContact",

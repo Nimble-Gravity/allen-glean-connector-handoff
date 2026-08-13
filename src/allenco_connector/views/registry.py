@@ -79,6 +79,7 @@ def build_view_specs(
     ``build`` overrides the generic row→document mapping. ``row_limit`` (from
     FETCH_ROW_LIMIT) applies to every view's fetch — 0 means no limit.
     ``exclude_columns`` (from EXCLUDE_COLUMNS) are dropped from every document body.
+    Entries with ``enabled=False`` are skipped.
     """
     return tuple(
         ViewSpec(
@@ -89,4 +90,5 @@ def build_view_specs(
             row_limit=row_limit,
         )
         for entry in catalog
+        if entry.enabled
     )
