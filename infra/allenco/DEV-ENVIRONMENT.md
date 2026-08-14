@@ -139,6 +139,14 @@ SYNC_STATE_BACKEND=none
 GLEAN_ENABLE_INDEXING=false   # start with a dry run (step 1)
 ```
 
+0. **Configure the datasource once** — Glean needs the object types declared and a
+   matching urlRegex before indexing. This does both from the catalog + `VIEW_URL_BASE`,
+   using only the token (no admin console):
+   ```powershell
+   python scripts\setup_datasource.py   # RESULT: PASS — datasource 'ems' configured with N object type(s)
+   ```
+   Re-run it whenever you enable/rename a view or change `VIEW_URL_BASE`.
+
 1. **Dry run first** — `$env:PYTHONPATH="src"; python -m main` → inspect `.outputs\ems_documents_*.json`:
    ~275 docs across 11 types, sensible titles, and the `EXCLUDE_COLUMNS` fields absent from the body.
 2. **Live push** — set `GLEAN_ENABLE_INDEXING=true`, run `python -m main`. Expect a log line
