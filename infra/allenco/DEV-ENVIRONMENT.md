@@ -130,8 +130,9 @@ Verify the Glean push end-to-end **without flooding Glean or over-exposing PII**
 GLEAN_INSTANCE=<instance>
 GLEAN_INDEXING_API_KEY=<token>
 GLEAN_DATASOURCE=allencoems
+VIEW_URL_BASE=https://ems.allenco.com   # per-doc viewURL; MUST match the datasource's urlRegex in Glean
 GLEAN_INDEXING_SUPERUSER_ALLOWED_USERS=["<your-glean-email>"]   # so you can SEE the docs in Glean
-FETCH_ROW_LIMIT=25            # ~25 rows x 11 views ~= 275 docs
+FETCH_ROW_LIMIT=25            # rows per view (10 enabled) ~= 250 docs
 GLEAN_FULL_REFRESH=true       # datasource = exactly this batch (replaceable)
 EXCLUDE_COLUMNS=DOB,LicenseNumber,LicenseExpirationDate,LicenseDOB,DietaryAllergyComments,RSVPDietaryAllergyComments
 SYNC_STATE_BACKEND=none

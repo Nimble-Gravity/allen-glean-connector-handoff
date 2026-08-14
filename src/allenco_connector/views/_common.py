@@ -29,6 +29,7 @@ def rows_to_documents(
     title_columns: Sequence[str],
     allowed_users: Iterable[UserReferenceDefinition] | None = None,
     view_url: str | None = None,
+    view_url_base: str = "",
     exclude_columns: Sequence[str] = (),
 ) -> list[DocumentDefinition]:
     """Build one Glean document per DataFrame row (generic skeleton mapping).
@@ -37,9 +38,14 @@ def rows_to_documents(
     ``object_type`` for the title so a stub view builds even before the real EMS
     column names are confirmed. ``exclude_columns`` (case-insensitive) are dropped
     from the document body — e.g. PII fields not cleared for indexing.
+
+    Glean requires a non-empty viewURL per document. When ``view_url_base`` is set, a
+    per-row URL ``{base}/{object_type}/{key}`` is stamped (unless an explicit
+    ``view_url`` is given). Replace the base with the real EMS/portal URL later.
     """
     allowed = list(allowed_users or [])
     excluded = {c.strip().lower() for c in exclude_columns if c.strip()}
+    url_base = (view_url_base or "").rstrip("/")
     docs: list[DocumentDefinition] = []
 
     for position, (_, row) in enumerate(df.iterrows()):
@@ -58,13 +64,17 @@ def rows_to_documents(
         title_parts = [str(row[c]) for c in title_columns if c in row and pd.notna(row[c])]
         title = " – ".join(title_parts) if title_parts else f"{object_type} {document_id}"
 
+        doc_view_url = view_url
+        if not doc_view_url and url_base:
+            doc_view_url = f"{url_base}/{object_type}/{row_key or position}"
+
         docs.append(
             build_document(
                 object_type=object_type,
                 datasource=datasource,
                 document_id=document_id,
                 title=title,
-                view_url=view_url,
+                view_url=doc_view_url,
                 body_payload=payload,
                 allowed_users=allowed or None,
             )

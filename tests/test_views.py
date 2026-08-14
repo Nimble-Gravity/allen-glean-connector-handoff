@@ -61,6 +61,19 @@ def test_jsonable_coerces_timestamp_nan_and_none():
     assert _jsonable("plain") == "plain"
 
 
+def test_view_url_base_stamps_per_row_url():
+    df = pd.DataFrame([{"AttendeeID": 7}])
+    docs = rows_to_documents(
+        df,
+        object_type="attendee",
+        datasource="ds",
+        id_column="AttendeeID",
+        title_columns=(),
+        view_url_base="https://ems.allenco.com/",
+    )
+    assert docs[0].view_url == "https://ems.allenco.com/attendee/7"
+
+
 def test_dedupe_documents_by_id_collapses_duplicates():
     # two rows share AttendeeID=1 → same document id "attendee:1"
     df = pd.DataFrame([{"AttendeeID": 1}, {"AttendeeID": 1}, {"AttendeeID": 2}])

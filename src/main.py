@@ -209,6 +209,7 @@ def _run(
                 default_schema=db_settings.schema,
                 row_limit=settings.fetch_row_limit,
                 exclude_columns=settings.exclude_columns,
+                view_url_base=settings.view_url_base,
             ):
                 since = sync_state.watermark_for(spec.view_name) if use_incremental else None
                 logger.info(

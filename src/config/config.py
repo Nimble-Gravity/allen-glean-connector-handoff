@@ -50,6 +50,11 @@ class ConnectorSettings:
     # e.g. PII fields not cleared for indexing. Empty = keep all columns.
     exclude_columns: tuple[str, ...] = ()
 
+    # Base URL stamped as each document's viewURL (VIEW_URL_BASE). Glean REQUIRES a
+    # non-empty viewURL. Placeholder default until the real EMS/portal URL is known;
+    # must match the datasource's urlRegex in Glean.
+    view_url_base: str = "https://ems.allenco.com"
+
     def require_glean_indexing_prereqs(self) -> tuple[str, GleanConfig]:
         """Return (datasource, glean_config). Raises ValueError if misconfigured."""
         datasource = self.glean_datasource.strip()
@@ -197,6 +202,8 @@ def load_connector_settings() -> ConnectorSettings:
         debug_files=_read_bool_env("DEBUG_FILES", default=False),
         fetch_row_limit=max(0, _read_int_env("FETCH_ROW_LIMIT", default=0)),
         exclude_columns=_read_csv_env("EXCLUDE_COLUMNS"),
+        view_url_base=_read_str_env("VIEW_URL_BASE", default="https://ems.allenco.com")
+        or "https://ems.allenco.com",
     )
 
 

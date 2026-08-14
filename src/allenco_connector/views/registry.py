@@ -72,19 +72,21 @@ def build_view_specs(
     default_schema: str = "dbo",
     row_limit: int = 0,
     exclude_columns: tuple[str, ...] = (),
+    view_url_base: str = "",
 ) -> tuple[ViewSpec, ...]:
     """Build one ViewSpec per catalog entry.
 
     An entry's ``schema`` overrides ``default_schema`` (from DB_SCHEMA); an entry's
     ``build`` overrides the generic row→document mapping. ``row_limit`` (from
     FETCH_ROW_LIMIT) applies to every view's fetch — 0 means no limit.
-    ``exclude_columns`` (from EXCLUDE_COLUMNS) are dropped from every document body.
-    Entries with ``enabled=False`` are skipped.
+    ``exclude_columns`` (EXCLUDE_COLUMNS) are dropped from every document body;
+    ``view_url_base`` (VIEW_URL_BASE) stamps a per-row viewURL. Entries with
+    ``enabled=False`` are skipped.
     """
     return tuple(
         ViewSpec(
             view_name=entry.view_name,
-            build=builder_for(entry, exclude_columns),
+            build=builder_for(entry, exclude_columns, view_url_base),
             watermark_column=entry.watermark_column,
             schema=entry.schema or default_schema,
             row_limit=row_limit,
