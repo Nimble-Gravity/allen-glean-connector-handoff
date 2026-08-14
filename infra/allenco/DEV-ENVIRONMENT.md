@@ -131,7 +131,11 @@ GLEAN_INSTANCE=<instance>
 GLEAN_INDEXING_API_KEY=<token>
 GLEAN_DATASOURCE=allencoems
 VIEW_URL_BASE=https://ems.allenco.com   # per-doc viewURL; MUST match the datasource's urlRegex in Glean
-GLEAN_INDEXING_SUPERUSER_ALLOWED_USERS=["<your-glean-email>"]   # so you can SEE the docs in Glean
+# Every document needs a permission. Either name a real Glean user (who can then SEE
+# the docs), OR set GLEAN_ALLOW_ANONYMOUS_ACCESS=true for a self-service test with no
+# email (org-wide visible — DEV/TEST ONLY). One of the two is required.
+GLEAN_INDEXING_SUPERUSER_ALLOWED_USERS=          # e.g. ["admin@allenco.com"] — optional if anonymous below
+GLEAN_ALLOW_ANONYMOUS_ACCESS=true                # DEV/TEST ONLY; prod uses the AD groups view
 FETCH_ROW_LIMIT=25            # rows per view (10 enabled) ~= 250 docs
 GLEAN_FULL_REFRESH=true       # datasource = exactly this batch (replaceable)
 EXCLUDE_COLUMNS=DOB,LicenseNumber,LicenseExpirationDate,LicenseDOB,DietaryAllergyComments,RSVPDietaryAllergyComments

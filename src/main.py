@@ -38,6 +38,7 @@ from glean_index.index_documents import (
     bulk_index_documents_paged,
     dedupe_documents_by_id,
     index_documents_paged,
+    set_anonymous_access_where_missing,
 )
 from glean_index.index_users import bulk_index_users_paged
 from glean_index.types.users import (
@@ -239,6 +240,18 @@ def _run(
             "(views without a unique per-row key — see catalog TODOs).",
             dropped_dupes,
         )
+
+    # Glean requires a permission on every document. When no ACL source is wired
+    # (no groups view, no superusers), optionally grant org-wide access so a test can
+    # index. DEV/TEST ONLY — production ACLs come from the groups view.
+    if settings.glean_allow_anonymous_access:
+        granted = set_anonymous_access_where_missing(documents)
+        if granted:
+            logger.warning(
+                "GLEAN_ALLOW_ANONYMOUS_ACCESS — granted org-wide (anonymous) access to "
+                "%d document(s) with no ACL. DEV/TEST ONLY; production uses the groups view.",
+                granted,
+            )
 
     if not glean_enabled:
         export_documents_to_json(documents, "ems_documents")

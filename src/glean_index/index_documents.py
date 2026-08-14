@@ -13,6 +13,25 @@ from glean_index.client import (
 logger = logging.getLogger(__name__)
 
 
+def set_anonymous_access_where_missing(documents: list[DocumentDefinition]) -> int:
+    """Grant org-wide (anonymous) access to documents that have no permissions.
+
+    Glean rejects a document with no permissions ("Permissions are not specified").
+    ⚠️ DEV/TEST ONLY — this makes the documents visible to everyone in the org.
+    Production ACLs come from the AD/Entra groups view. Returns the number updated.
+    """
+    from glean.api_client.models.documentpermissionsdefinition import (
+        DocumentPermissionsDefinition,
+    )
+
+    updated = 0
+    for doc in documents:
+        if doc.permissions is None:
+            doc.permissions = DocumentPermissionsDefinition(allow_anonymous_access=True)
+            updated += 1
+    return updated
+
+
 def dedupe_documents_by_id(
     documents: list[DocumentDefinition],
 ) -> tuple[list[DocumentDefinition], int]:

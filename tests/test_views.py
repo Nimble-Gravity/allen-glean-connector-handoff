@@ -5,7 +5,10 @@ import json
 import pandas as pd
 
 from allenco_connector.views._common import _jsonable, rows_to_documents
-from glean_index.index_documents import dedupe_documents_by_id
+from glean_index.index_documents import (
+    dedupe_documents_by_id,
+    set_anonymous_access_where_missing,
+)
 
 
 def test_builds_one_document_per_row():
@@ -59,6 +62,22 @@ def test_jsonable_coerces_timestamp_nan_and_none():
     assert _jsonable(float("nan")) is None
     assert _jsonable(None) is None
     assert _jsonable("plain") == "plain"
+
+
+def test_set_anonymous_access_where_missing():
+    # a document built without allowed_users has no permissions
+    docs = rows_to_documents(
+        pd.DataFrame([{"AttendeeID": 1}]),
+        object_type="attendee",
+        datasource="ds",
+        id_column="AttendeeID",
+        title_columns=(),
+    )
+    assert docs[0].permissions is None
+    updated = set_anonymous_access_where_missing(docs)
+    assert updated == 1
+    assert docs[0].permissions is not None
+    assert docs[0].permissions.allow_anonymous_access is True
 
 
 def test_view_url_base_stamps_per_row_url():

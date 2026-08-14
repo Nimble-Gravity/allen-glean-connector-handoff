@@ -55,6 +55,12 @@ class ConnectorSettings:
     # must match the datasource's urlRegex in Glean.
     view_url_base: str = "https://ems.allenco.com"
 
+    # DEV/TEST ONLY (GLEAN_ALLOW_ANONYMOUS_ACCESS): grant org-wide (anonymous) access
+    # to documents that would otherwise have no ACL, so a test can index without
+    # superusers or the groups view. ⚠️ Production ACLs come from the AD groups view —
+    # keep this False in prod.
+    glean_allow_anonymous_access: bool = False
+
     def require_glean_indexing_prereqs(self) -> tuple[str, GleanConfig]:
         """Return (datasource, glean_config). Raises ValueError if misconfigured."""
         datasource = self.glean_datasource.strip()
@@ -204,6 +210,7 @@ def load_connector_settings() -> ConnectorSettings:
         exclude_columns=_read_csv_env("EXCLUDE_COLUMNS"),
         view_url_base=_read_str_env("VIEW_URL_BASE", default="https://ems.allenco.com")
         or "https://ems.allenco.com",
+        glean_allow_anonymous_access=_read_bool_env("GLEAN_ALLOW_ANONYMOUS_ACCESS", default=False),
     )
 
 
