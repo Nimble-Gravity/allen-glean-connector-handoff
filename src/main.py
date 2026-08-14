@@ -36,6 +36,7 @@ from glean_index.env_superusers import (
 )
 from glean_index.index_documents import (
     bulk_index_documents_paged,
+    dedupe_documents_by_id,
     index_documents_paged,
 )
 from glean_index.index_users import bulk_index_users_paged
@@ -227,6 +228,16 @@ def _run(
                     sync_state.set_watermark(spec.view_name, new_watermark, count=len(docs))
         finally:
             conn.close()
+
+    # Glean rejects a bulk upload with duplicate document ids. Some views lack a
+    # unique per-row key (see catalog TODOs), so collapse duplicates (last wins).
+    documents, dropped_dupes = dedupe_documents_by_id(documents)
+    if dropped_dupes:
+        logger.warning(
+            "Dropped %d document(s) with duplicate ids before indexing "
+            "(views without a unique per-row key — see catalog TODOs).",
+            dropped_dupes,
+        )
 
     if not glean_enabled:
         export_documents_to_json(documents, "ems_documents")

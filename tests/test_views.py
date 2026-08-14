@@ -5,6 +5,7 @@ import json
 import pandas as pd
 
 from allenco_connector.views._common import _jsonable, rows_to_documents
+from glean_index.index_documents import dedupe_documents_by_id
 
 
 def test_builds_one_document_per_row():
@@ -58,6 +59,17 @@ def test_jsonable_coerces_timestamp_nan_and_none():
     assert _jsonable(float("nan")) is None
     assert _jsonable(None) is None
     assert _jsonable("plain") == "plain"
+
+
+def test_dedupe_documents_by_id_collapses_duplicates():
+    # two rows share AttendeeID=1 → same document id "attendee:1"
+    df = pd.DataFrame([{"AttendeeID": 1}, {"AttendeeID": 1}, {"AttendeeID": 2}])
+    docs = rows_to_documents(
+        df, object_type="attendee", datasource="ds", id_column="AttendeeID", title_columns=()
+    )
+    deduped, dropped = dedupe_documents_by_id(docs)
+    assert dropped == 1
+    assert sorted(d.id for d in deduped) == ["attendee:1", "attendee:2"]
 
 
 def test_exclude_columns_dropped_from_body_case_insensitive():

@@ -13,6 +13,21 @@ from glean_index.client import (
 logger = logging.getLogger(__name__)
 
 
+def dedupe_documents_by_id(
+    documents: list[DocumentDefinition],
+) -> tuple[list[DocumentDefinition], int]:
+    """Drop documents whose id already appeared (last one wins).
+
+    Glean rejects a bulk upload that contains duplicate document ids, and some views
+    lack a unique per-row key (e.g. v_TravelAir keyed by AttendeeID → one attendee has
+    several flights). Returns (deduped_documents, number_dropped).
+    """
+    by_id: dict[str, DocumentDefinition] = {}
+    for doc in documents:
+        by_id[doc.id] = doc
+    return list(by_id.values()), len(documents) - len(by_id)
+
+
 def bulk_index_documents(
     *,
     datasource: str,
