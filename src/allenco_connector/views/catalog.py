@@ -79,7 +79,7 @@ VIEW_CATALOG: tuple[ViewCatalogEntry, ...] = (
     ),
     ViewCatalogEntry(
         view_name="v_StartInformation",
-        object_type="start_information",
+        object_type="startInformation",
         id_column="EventInstanceAttendeeID",
         title_columns=("FirstName", "LastName"),
         watermark_column=None,
@@ -91,7 +91,7 @@ VIEW_CATALOG: tuple[ViewCatalogEntry, ...] = (
     ),
     ViewCatalogEntry(
         view_name="v_AttendeeContact",
-        object_type="attendee_contact",
+        object_type="attendeeContact",
         id_column="AttendeeID",
         title_columns=("Email",),
         watermark_column=None,
@@ -117,7 +117,7 @@ VIEW_CATALOG: tuple[ViewCatalogEntry, ...] = (
     #    Confirm the real PK (or use a composite id via a build override).
     ViewCatalogEntry(
         view_name="v_ActivityAttendants",
-        object_type="activity_attendant",
+        object_type="activityAttendant",
         id_column="EventInstanceActivityID",  # TODO: confirm unique per row
         title_columns=("FirstName", "LastName"),
         watermark_column=None,
@@ -125,7 +125,7 @@ VIEW_CATALOG: tuple[ViewCatalogEntry, ...] = (
     ),
     ViewCatalogEntry(
         view_name="v_TravelAir",
-        object_type="travel_air",
+        object_type="travelAir",
         id_column="AttendeeID",  # TODO: NOT unique per row (many flights/attendee)
         title_columns=("FirstName", "LastName"),
         watermark_column=None,
@@ -133,7 +133,7 @@ VIEW_CATALOG: tuple[ViewCatalogEntry, ...] = (
     ),
     ViewCatalogEntry(
         view_name="v_TravelGroupInfo",
-        object_type="travel_group",
+        object_type="travelGroup",
         id_column="HeadID",  # TODO: confirm unique per row
         title_columns=(),
         watermark_column=None,
@@ -150,7 +150,7 @@ VIEW_CATALOG: tuple[ViewCatalogEntry, ...] = (
     ),
     ViewCatalogEntry(
         view_name="v_GarmentSizes",
-        object_type="garment_size",
+        object_type="garmentSize",
         id_column="RecordID",
         title_columns=("NameAlias",),
         watermark_column=None,
@@ -158,7 +158,7 @@ VIEW_CATALOG: tuple[ViewCatalogEntry, ...] = (
     ),
     ViewCatalogEntry(
         view_name="v_PreferenceType",
-        object_type="preference_type",
+        object_type="preferenceType",
         id_column="RecordID",
         title_columns=("Description",),
         watermark_column=None,

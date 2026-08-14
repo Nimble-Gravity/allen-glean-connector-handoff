@@ -21,6 +21,7 @@ env below when known.
 """
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -38,7 +39,12 @@ from glean_index.client import GleanConfig, get_glean_client  # noqa: E402
 
 
 def _label(object_type: str) -> str:
-    return object_type.replace("_", " ").title()
+    """camelCase/underscore object type -> a readable display label.
+
+    e.g. 'attendeeContact' -> 'Attendee Contact'.
+    """
+    spaced = re.sub(r"(?<!^)(?=[A-Z])", " ", object_type.replace("_", " "))
+    return spaced.strip().title()
 
 
 def main() -> int:

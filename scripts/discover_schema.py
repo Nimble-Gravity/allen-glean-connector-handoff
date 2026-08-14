@@ -16,6 +16,7 @@ to replace the seed entries in catalog.py with the real Conference views.
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -53,9 +54,14 @@ _WATERMARK_HINTS = ("modif", "updat", "chang", "lastmod")
 
 
 def _object_type_from_view(view_name: str) -> str:
-    """v_Attendee_Event -> 'attendee_event' (strip a leading v_/V_, lowercase)."""
+    """v_AttendeeContact -> 'attendeeContact' (strip a leading v_/V_, drop separators,
+    lowercase the first letter). Glean object types must be alphanumeric (no '_')."""
     stripped = view_name[2:] if view_name[:2].lower() == "v_" else view_name
-    return stripped.strip().lower().replace(" ", "_")
+    parts = [p for p in re.split(r"[_\s]+", stripped.strip()) if p]
+    if not parts:
+        return "record"
+    joined = "".join(parts)  # view names are already CamelCase (AttendeeContact)
+    return joined[:1].lower() + joined[1:]
 
 
 def _guess_id_column(columns: list[dict]) -> str:
