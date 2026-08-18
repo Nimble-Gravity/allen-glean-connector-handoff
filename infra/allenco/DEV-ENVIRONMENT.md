@@ -138,20 +138,21 @@ Verify the Glean push end-to-end **without flooding Glean or over-exposing PII**
 ```
 GLEAN_INSTANCE=<instance>
 GLEAN_INDEXING_API_KEY=<token>
-GLEAN_DATASOURCE=allencoems
+GLEAN_DATASOURCE=ems
 VIEW_URL_BASE=https://ems.allenco.com   # per-doc viewURL; MUST match the datasource's urlRegex in Glean
 # Every document needs a permission. Either name a real Glean user (who can then SEE
 # the docs), OR set GLEAN_ALLOW_ANONYMOUS_ACCESS=true for a self-service test with no
 # email (org-wide visible — DEV/TEST ONLY). One of the two is required.
 GLEAN_INDEXING_SUPERUSER_ALLOWED_USERS=          # e.g. ["admin@allenco.com"] — optional if anonymous below
 GLEAN_ALLOW_ANONYMOUS_ACCESS=true                # DEV/TEST ONLY; prod uses the AD groups view
-FETCH_ROW_LIMIT=25            # rows per view (10 enabled) ~= 250 docs
+FETCH_ROW_LIMIT=25            # rows per view (v1 = 2 enabled: attendee + attendeeConf) ~= 50 docs
 GLEAN_FULL_REFRESH=true       # datasource = exactly this batch (replaceable)
 # PII: mirror the Salesforce connector's exclusions. KEEP dietary/allergy — the client
 # says it is a MUST-HAVE (catering), so it is NO LONGER excluded. EXCLUDE_COLUMNS is an
-# EXACT (case-insensitive) column-name match, so reconcile these against .outputs/schema.json
-# — the list below is a conservative template (identity / legal / travel-doc fields), not final.
-EXCLUDE_COLUMNS=DOB,LicenseNumber,LicenseExpirationDate,LicenseDOB,LicenseState,PassportNumber,PassportExpiration,PassportCountry,KnownTravelerNumber,RedressNumber,SSN,NationalID
+# EXACT (case-insensitive) column-name match. The list below is reconciled to the real
+# rpt.v_Attendee_Global / travel columns (raw birthdate + driver-license/legal-ID fields);
+# extend it as more views are enabled.
+EXCLUDE_COLUMNS=DOB,LicenseDOB,LicenseNumber,LicenseName,LicenseState,LicenseStateShort,LicenseExpirationDate,LicenseCountry
 SYNC_STATE_BACKEND=none
 GLEAN_ENABLE_INDEXING=false   # start with a dry run (step 1)
 ```
@@ -165,9 +166,11 @@ GLEAN_ENABLE_INDEXING=false   # start with a dry run (step 1)
    Re-run it whenever you enable/rename a view or change `VIEW_URL_BASE`.
 
 1. **Dry run first** — `$env:PYTHONPATH="src"; python -m main` → inspect `.outputs\ems_documents_*.json`:
-   ~275 docs across 11 types, sensible titles, and the `EXCLUDE_COLUMNS` fields absent from the body.
+   ~50 docs across 2 types (`attendee`, `attendeeConf`), titles like "Jane Doe – Acme Corp" and
+   "Jane Doe – SV26", `EventInstanceID` in each Tier-2 doc's custom properties, and the
+   `EXCLUDE_COLUMNS` fields absent from the body.
 2. **Live push** — set `GLEAN_ENABLE_INDEXING=true`, run `python -m main`. Expect a log line
-   `Starting Glean indexing. datasource=allencoems mode=full_refresh ... documents=~275` and
+   `Starting Glean indexing. datasource=ems mode=full_refresh ... documents=~50` and
    `ok=True`. (⚠️ The connector warns if indexing is on with `FETCH_ROW_LIMIT=0` — that would push
    EVERY row; keep the cap for the test.)
 3. **Verify in Glean** — signed in as the superuser email, search a known attendee/activity: the

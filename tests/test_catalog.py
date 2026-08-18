@@ -15,12 +15,20 @@ def test_default_schema_inherited_when_entry_unset():
     assert spec.schema == "Conference"
 
 
-def test_real_catalog_pins_cnf_schema():
+def test_real_catalog_pins_rpt_schema_and_layered_model():
+    # every entry pins schema="rpt", so DB_SCHEMA is moot.
+    assert all(e.schema == "rpt" for e in VIEW_CATALOG)
     specs = build_view_specs(VIEW_CATALOG, default_schema="dbo")
     enabled = [e for e in VIEW_CATALOG if e.enabled]
     assert len(specs) == len(enabled)
-    # the Conference catalog pins schema="cnf" on every entry, so DB_SCHEMA is moot.
-    assert all(s.schema == "cnf" for s in specs)
+    assert all(s.schema == "rpt" for s in specs)
+    # v1 enables Tier 1 (attendee, global) + Tier 2 (attendeeConf, per-conference).
+    assert {e.object_type for e in enabled} == {"attendee", "attendeeConf"}
+    # Tier 2 is keyed by the composite (AttendeeID, EventInstanceID) and carries
+    # EventInstanceID as a filterable custom property (per-conference scoping).
+    (t2,) = [e for e in VIEW_CATALOG if e.object_type == "attendeeConf"]
+    assert t2.id_columns == ("AttendeeID", "EventInstanceID")
+    assert "EventInstanceID" in t2.property_columns
 
 
 def test_build_view_specs_skips_disabled_entries():

@@ -1,33 +1,45 @@
-"""Declarative catalog of the EMS views the indexer snapshots into Glean.
+"""Declarative catalog of the EMS report views the indexer snapshots into Glean.
 
 This is the single place to list the in-scope views ("connectivity is
 configuration, not code"). ``registry.build_view_specs`` turns each entry into a
 runnable ViewSpec that reads the view and maps every row to one Glean document via
 the generic ``rows_to_documents`` builder — no per-view Python required.
 
-The in-scope views are the **`cnf` (Conference) schema** of the Allen & Co
-``Conference`` database — 11 views covering attendees, their event profiles,
-activities, and travel. Confirmed via ``scripts/discover_schema.py`` against the
-real DB (server aml-azr-sql-001, database ``Conference``). Connect with
-``DB_NAME=Conference``; each entry pins ``schema="cnf"`` so it works regardless of
-``DB_SCHEMA``.
+**Source = the `rpt` (report) schema** of the Allen & Co ``Conference`` database —
+the client's recommended, report-optimized (already-joined) views, confirmed via
+``scripts/discover_schema.py``. Each entry pins ``schema="rpt"`` so it works
+regardless of ``DB_SCHEMA``.
 
-To refine or extend: re-run ``python scripts/discover_schema.py`` on the VM (dumps
-``.outputs/schema.json`` + pasteable entries), edit below, then dry-run and inspect
-``.outputs/ems_documents_*.json``.
+The catalog implements the **layered, EventInstanceID-anchored document model**
+(see ``docs/document-model.md``):
+  - **Tier 1 — ``attendee``** (``v_Attendee_Global``): one doc per ``AttendeeID`` with
+    stable global identity (name, company, dietary/allergy).
+  - **Tier 2 — ``attendeeConf``** (``v_Invitation_CurrentStatus``): one doc per
+    ``(AttendeeID, EventInstanceID)`` — the person's status at a specific conference.
+    Self-sufficient (person name + conference code/name + status) so Glean can answer
+    "was <name> at <conference>?". ``EventInstanceID`` rides as a custom property for
+    per-conference filtering.
+  - **Tier 3 — detail** (travel / activity / catering): per-conference facts, keyed by
+    a composite id. Shipped **disabled** — enable after Tier 1/2 dry-runs look good.
 
-⚠️ Two things to confirm with the client (flagged inline):
-  - The 🟡 travel/junction views (v_TravelAir, v_TravelGroupInfo, v_ActivityAttendants)
-    lack a single unique row key, so a document-per-row can collide (e.g. multiple
-    flights per attendee). The dry run will surface duplicate ids; fix with the real
-    PK or a composite id (via a per-entry ``build`` override).
-  - Only v_Attendee exposes a real change-tracking column (``UpdatedOn``). The rest
-    full-fetch each run (``watermark_column=None``) — the discovery heuristic's
-    date guesses (DOB/StartDate/…) are NOT modification timestamps.
+Conference identity: ``EventInstanceShort`` (e.g. "SV26") / ``EventInstance``
+("Sun Valley Conference 2026") come inline on Tier 2. The **current** conference is
+``IsDefault = 1`` on the EventInstance master (``dbo.v_EventInstance``); the hourly job
+filters Tier 2 to that ``EventInstanceID`` (job concern, not the catalog).
 
-NOTE: this catalog now targets the real cnf schema; the local Docker mock
-(infra/sql/mirror_schema.sql, dbo) no longer matches it. Update the mock to mirror
-these views if you want to keep the local smoke-test loop.
+To refine/extend: re-run ``scripts/discover_schema.py`` on the VM, edit below, then
+dry-run and inspect ``.outputs/ems_documents_*.json`` (verify unique ids, readable
+titles, PII absent). Use ``id_columns`` for composite keys and ``property_columns`` for
+filterable metadata — no per-view Python needed for the common case.
+
+⚠️ Tier-2 completeness: ``v_Invitation_CurrentStatus`` covers *invited* guests. If the
+client needs the complete roster (local staff / vendors / children who never went
+through the invitation flow), swap or add ``v_EventInstance_Attendee`` (the registration
+record the client named — has ``UpdatedOn`` for incremental sync, but carries IDs, not
+the person name / conference code, so its title is weaker). Decide after a dry-run.
+
+NOTE: this catalog targets the real ``rpt`` schema; the local Docker mock
+(``infra/sql/mirror_schema.sql``, dbo) no longer matches it.
 """
 
 from collections.abc import Callable
@@ -72,104 +84,86 @@ class ViewCatalogEntry:
     build: BuildFn | None = field(default=None, compare=False)
 
 
-# The cnf (Conference) schema — 11 views. Columns confirmed against the real DB
-# (scripts/discover_schema.py). schema="cnf" is pinned per entry.
+# The rpt (report) schema. Columns confirmed against the real DB
+# (scripts/discover_schema.py → .outputs/schema.json). schema="rpt" is pinned per entry.
 VIEW_CATALOG: tuple[ViewCatalogEntry, ...] = (
-    # -- core entities (clear per-row key) ------------------------------------
+    # ── Tier 1 — Attendee (global identity): one document per AttendeeID ──────
     ViewCatalogEntry(
-        view_name="v_Attendee",
+        view_name="v_Attendee_Global",
         object_type="attendee",
-        id_column="RecordID",
-        title_columns=("FirstName", "LastName"),
-        watermark_column="UpdatedOn",  # the only real change-tracking column
-        schema="cnf",
-    ),
-    ViewCatalogEntry(
-        view_name="v_StartInformation",
-        object_type="startInformation",
-        id_column="EventInstanceAttendeeID",
-        title_columns=("FirstName", "LastName"),
-        watermark_column=None,
-        schema="cnf",
-        # DISABLED: ~8M rows and a complex view, so SELECT TOP (N) does NOT short-
-        # circuit — a fetch materializes the whole thing and hangs. Re-enable once the
-        # client confirms the granularity/event filter for this view (scope question).
-        enabled=False,
-    ),
-    ViewCatalogEntry(
-        view_name="v_AttendeeContact",
-        object_type="attendeeContact",
         id_column="AttendeeID",
-        title_columns=("Email",),
-        watermark_column=None,
-        schema="cnf",
+        title_columns=("InformalName", "Company"),  # "Jane Doe – Acme Corp"
+        property_columns=("AttendeeID",),
+        watermark_column=None,  # global view has no change-tracking column → full-fetch
+        schema="rpt",
     ),
+    # ── Tier 2 — Attendee @ Conference: one doc per (AttendeeID, EventInstanceID) ─
+    #    Self-sufficient (person name + conference code/name + status) so Glean can
+    #    answer "was <name> at <conference>?". EventInstanceID rides as a property.
     ViewCatalogEntry(
-        view_name="v_AssistantsInformation",
-        object_type="assistant",
-        id_column="RowID",
-        title_columns=("Name",),
-        watermark_column=None,
-        schema="cnf",
+        view_name="v_Invitation_CurrentStatus",
+        object_type="attendeeConf",
+        id_column="AttendeeID",
+        id_columns=("AttendeeID", "EventInstanceID"),
+        title_columns=("FormalName", "EventInstanceShort"),  # "Jane Doe – SV26"
+        property_columns=(
+            "AttendeeID",
+            "EventInstanceID",
+            "EventInstanceShort",
+            "EventYear",
+            "InvitationStatus",
+            "Company",
+        ),
+        watermark_column=None,  # "current status" view; full-fetch (row-capped in test)
+        schema="rpt",
     ),
-    ViewCatalogEntry(
-        view_name="v_Activity",
-        object_type="activity",
-        id_column="RecordID",
-        title_columns=("Name",),
-        watermark_column=None,
-        schema="cnf",
-    ),
-    # -- 🟡 travel / junction: id_column is a best guess and may COLLIDE per row.
-    #    Confirm the real PK (or use a composite id via a build override).
-    ViewCatalogEntry(
-        view_name="v_ActivityAttendants",
-        object_type="activityAttendant",
-        id_column="EventInstanceActivityID",  # TODO: confirm unique per row
-        title_columns=("FirstName", "LastName"),
-        watermark_column=None,
-        schema="cnf",
-    ),
+    # ── Tier 3 — per-conference detail (DISABLED for v1) ──────────────────────
+    #    Enable once Tier 1/2 dry-runs look good. Composite ids keep each fact unique;
+    #    EventInstanceID rides as a property for per-conference filtering. Confirm the
+    #    title/property columns against a dry-run before enabling.
     ViewCatalogEntry(
         view_name="v_TravelAir",
         object_type="travelAir",
-        id_column="AttendeeID",  # TODO: NOT unique per row (many flights/attendee)
-        title_columns=("FirstName", "LastName"),
-        watermark_column=None,
-        schema="cnf",
+        id_column="RecordID",
+        id_columns=("AttendeeID", "EventInstanceID", "RecordID"),
+        title_columns=("AirlineName", "FlightNumber"),
+        property_columns=("AttendeeID", "EventInstanceID", "TravelRecordTypeName", "TravelDate"),
+        watermark_column="UpdatedOn",
+        schema="rpt",
+        enabled=False,
     ),
     ViewCatalogEntry(
-        view_name="v_TravelGroupInfo",
-        object_type="travelGroup",
-        id_column="HeadID",  # TODO: confirm unique per row
+        view_name="v_TravelGround",
+        object_type="travelGround",
+        id_column="RecordID",
+        id_columns=("AttendeeID", "EventInstanceID", "RecordID"),
+        title_columns=("TravelMethodGroundName", "TravelDate"),
+        property_columns=("AttendeeID", "EventInstanceID", "TravelRecordTypeName", "TravelDate"),
+        watermark_column="UpdatedOn",
+        schema="rpt",
+        enabled=False,
+    ),
+    ViewCatalogEntry(
+        view_name="v_Activity_Attendee_TimeRange",
+        object_type="activityAttendee",
+        id_column="EventInstanceActivityID",
+        id_columns=("AttendeeID", "EventInstanceID", "EventInstanceActivityID"),
         title_columns=(),
+        property_columns=("AttendeeID", "EventInstanceID", "ActivityID"),
         watermark_column=None,
-        schema="cnf",
-    ),
-    # -- 🔵 small reference/lookup views (low search value; drop if not useful) -
-    ViewCatalogEntry(
-        view_name="v_Airline",
-        object_type="airline",
-        id_column="RecordID",
-        title_columns=(),
-        watermark_column=None,
-        schema="cnf",
+        schema="rpt",
+        enabled=False,
     ),
     ViewCatalogEntry(
-        view_name="v_GarmentSizes",
-        object_type="garmentSize",
-        id_column="RecordID",
-        title_columns=("NameAlias",),
+        view_name="v_Catering_TableAssignment",
+        object_type="catering",
+        id_column="EventInstanceActivityID",
+        id_columns=("AttendeeID", "EventInstanceID", "EventInstanceActivityID"),
+        title_columns=("Activity", "FormalName"),
+        property_columns=("AttendeeID", "EventInstanceID", "ActivityID"),
         watermark_column=None,
-        schema="cnf",
-    ),
-    ViewCatalogEntry(
-        view_name="v_PreferenceType",
-        object_type="preferenceType",
-        id_column="RecordID",
-        title_columns=("Description",),
-        watermark_column=None,
-        schema="cnf",
+        schema="rpt",
+        enabled=False,
     ),
 )
 
