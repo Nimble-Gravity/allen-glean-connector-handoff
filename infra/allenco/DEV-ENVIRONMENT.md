@@ -165,12 +165,19 @@ GLEAN_ENABLE_INDEXING=false   # start with a dry run (step 1)
    ```
    Re-run it whenever you enable/rename a view or change `VIEW_URL_BASE`.
 
+   > ⚠️ The name-bearing attendee views (`v_Attendee_Global`, `v_Invitation_CurrentStatus`) are
+   > **disabled** in the catalog because they read `ConferenceImage.dbo.Attendee_Picture`, a database
+   > the replica cannot access (SQL 4413 — confirm with `python scripts\probe_views.py`). The
+   > **enabled** set is the "binds-today" views: `attendeeConf`, `catering`, `activityAttendee`,
+   > `travelAir`, `travelGround`. Enable the name-bearing views once the client grants read access to
+   > `ConferenceImage`, then re-run `setup_datasource.py`.
+
 1. **Dry run first** — `$env:PYTHONPATH="src"; python -m main` → inspect `.outputs\ems_documents_*.json`:
-   ~50 docs across 2 types (`attendee`, `attendeeConf`), titles like "Jane Doe – Acme Corp" and
-   "Jane Doe – SV26", `EventInstanceID` in each Tier-2 doc's custom properties, and the
-   `EXCLUDE_COLUMNS` fields absent from the body.
+   ~5 object types (`attendeeConf`, `catering`, `activityAttendee`, `travelAir`, `travelGround`),
+   `EventInstanceID` in every doc's custom properties, titles like "Jane Doe – Welcome Dinner"
+   (catering), and the `EXCLUDE_COLUMNS` fields absent from the body.
 2. **Live push** — set `GLEAN_ENABLE_INDEXING=true`, run `python -m main`. Expect a log line
-   `Starting Glean indexing. datasource=ems mode=full_refresh ... documents=~50` and
+   `Starting Glean indexing. datasource=ems mode=full_refresh ... documents=~N` and
    `ok=True`. (⚠️ The connector warns if indexing is on with `FETCH_ROW_LIMIT=0` — that would push
    EVERY row; keep the cap for the test.)
 3. **Verify in Glean** — signed in as the superuser email, search a known attendee/activity: the

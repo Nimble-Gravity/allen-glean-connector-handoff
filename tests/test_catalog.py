@@ -22,13 +22,30 @@ def test_real_catalog_pins_rpt_schema_and_layered_model():
     enabled = [e for e in VIEW_CATALOG if e.enabled]
     assert len(specs) == len(enabled)
     assert all(s.schema == "rpt" for s in specs)
-    # v1 enables Tier 1 (attendee, global) + Tier 2 (attendeeConf, per-conference).
-    assert {e.object_type for e in enabled} == {"attendee", "attendeeConf"}
-    # Tier 2 is keyed by the composite (AttendeeID, EventInstanceID) and carries
-    # EventInstanceID as a filterable custom property (per-conference scoping).
-    (t2,) = [e for e in VIEW_CATALOG if e.object_type == "attendeeConf"]
+
+    by_type = {e.object_type: e for e in VIEW_CATALOG}
+    enabled_types = {e.object_type for e in enabled}
+    # The enabled set is the "binds today" group (no ConferenceImage dependency).
+    assert enabled_types == {
+        "attendeeConf",
+        "catering",
+        "activityAttendee",
+        "travelAir",
+        "travelGround",
+    }
+    # The name-bearing views transitively read ConferenceImage → shipped DISABLED until
+    # the client grants replica read access to that database.
+    assert not by_type["attendee"].enabled
+    assert not by_type["attendeeStatus"].enabled
+
+    # Tier 2 (attendeeConf) is keyed by the composite (AttendeeID, EventInstanceID) and
+    # carries EventInstanceID as a filterable custom property (per-conference scoping).
+    t2 = by_type["attendeeConf"]
+    assert t2.view_name == "v_EventInstance_Attendee"
     assert t2.id_columns == ("AttendeeID", "EventInstanceID")
     assert "EventInstanceID" in t2.property_columns
+    # every enabled conference-scoped view carries EventInstanceID as a property
+    assert all("EventInstanceID" in e.property_columns for e in enabled)
 
 
 def test_build_view_specs_skips_disabled_entries():

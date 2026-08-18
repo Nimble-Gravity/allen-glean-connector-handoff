@@ -11,32 +11,33 @@ the client's recommended, report-optimized (already-joined) views, confirmed via
 regardless of ``DB_SCHEMA``.
 
 The catalog implements the **layered, EventInstanceID-anchored document model**
-(see ``docs/document-model.md``):
-  - **Tier 1 — ``attendee``** (``v_Attendee_Global``): one doc per ``AttendeeID`` with
-    stable global identity (name, company, dietary/allergy).
-  - **Tier 2 — ``attendeeConf``** (``v_Invitation_CurrentStatus``): one doc per
-    ``(AttendeeID, EventInstanceID)`` — the person's status at a specific conference.
-    Self-sufficient (person name + conference code/name + status) so Glean can answer
-    "was <name> at <conference>?". ``EventInstanceID`` rides as a custom property for
-    per-conference filtering.
-  - **Tier 3 — detail** (travel / activity / catering): per-conference facts, keyed by
-    a composite id. Shipped **disabled** — enable after Tier 1/2 dry-runs look good.
+(see ``docs/document-model.md``), split by BIND status on the read replica:
 
-Conference identity: ``EventInstanceShort`` (e.g. "SV26") / ``EventInstance``
-("Sun Valley Conference 2026") come inline on Tier 2. The **current** conference is
-``IsDefault = 1`` on the EventInstance master (``dbo.v_EventInstance``); the hourly job
-filters Tier 2 to that ``EventInstanceID`` (job concern, not the catalog).
+**Enabled (bind today, no ConferenceImage):**
+  - **Tier 2 — ``attendeeConf``** (``v_EventInstance_Attendee``): one doc per
+    ``(AttendeeID, EventInstanceID)`` — the registration/attendance record the client
+    named. Carries IDs + company (no person name in this view), ``UpdatedOn`` for
+    incremental sync, and ``EventInstanceID`` as a custom property.
+  - **Tier 3 — detail** (``catering``, ``activityAttendee``, ``travelAir``,
+    ``travelGround``): per-conference facts, composite-keyed. ``catering``
+    (``v_Catering_TableAssignment``) carries the person name.
 
-To refine/extend: re-run ``scripts/discover_schema.py`` on the VM, edit below, then
-dry-run and inspect ``.outputs/ems_documents_*.json`` (verify unique ids, readable
-titles, PII absent). Use ``id_columns`` for composite keys and ``property_columns`` for
-filterable metadata — no per-view Python needed for the common case.
+**Disabled (blocked on ConferenceImage — the name-bearing views):**
+  - **Tier 1 — ``attendee``** (``v_Attendee_Global``) and **``attendeeStatus``**
+    (``v_Invitation_CurrentStatus``, name + conference code + status — the richest doc
+    for "was <name> at <conference>?"). Their definitions transitively read
+    ``ConferenceImage.dbo.Attendee_Picture`` (the photo table), which is not present on
+    the replica → SQL 4413. **Enable them once the client grants read access to
+    ``ConferenceImage``.** Verified with ``scripts/probe_views.py``.
 
-⚠️ Tier-2 completeness: ``v_Invitation_CurrentStatus`` covers *invited* guests. If the
-client needs the complete roster (local staff / vendors / children who never went
-through the invitation flow), swap or add ``v_EventInstance_Attendee`` (the registration
-record the client named — has ``UpdatedOn`` for incremental sync, but carries IDs, not
-the person name / conference code, so its title is weaker). Decide after a dry-run.
+Conference identity: ``EventInstanceShort`` (e.g. "SV26") / ``EventInstance`` come inline
+on the disabled name-bearing views; the **current** conference is ``IsDefault = 1`` on the
+EventInstance master (``dbo.v_EventInstance``); the hourly job filters Tier 2 to that
+``EventInstanceID`` (job concern, not the catalog).
+
+To refine/extend: run ``scripts/probe_views.py`` (bind check) + ``discover_schema.py``
+(columns) on the VM, edit below, then dry-run and inspect ``.outputs/ems_documents_*.json``.
+Use ``id_columns`` for composite keys and ``property_columns`` for filterable metadata.
 
 NOTE: this catalog targets the real ``rpt`` schema; the local Docker mock
 (``infra/sql/mirror_schema.sql``, dbo) no longer matches it.
@@ -84,25 +85,97 @@ class ViewCatalogEntry:
     build: BuildFn | None = field(default=None, compare=False)
 
 
-# The rpt (report) schema. Columns confirmed against the real DB
-# (scripts/discover_schema.py → .outputs/schema.json). schema="rpt" is pinned per entry.
+# The rpt (report) schema. Columns confirmed against the real DB and each view's BIND
+# status verified with scripts/probe_views.py. schema="rpt" is pinned per entry.
+#
+# ⚠️ ConferenceImage: the name-bearing attendee/identity views transitively read
+#    ConferenceImage.dbo.Attendee_Picture (the photo table), which is NOT present on the
+#    read replica → those views fail to bind (SQL 4413) and are DISABLED below. Enable
+#    them once the client grants the replica read access to ConferenceImage. Everything
+#    in the "binds today" group works without it.
 VIEW_CATALOG: tuple[ViewCatalogEntry, ...] = (
-    # ── Tier 1 — Attendee (global identity): one document per AttendeeID ──────
+    # ══ Binds today (no ConferenceImage) — ENABLED ═══════════════════════════════
+    # Tier 2 — Attendee @ Conference (the registration/attendance record the client
+    # named: "check for an EventInstance_Attendee record for that AttendeeID +
+    # EventInstanceID"). One doc per (AttendeeID, EventInstanceID); EventInstanceID
+    # rides as a custom property for per-conference filtering. No person name in this
+    # view (only IDs + company), so its title is company/code — the name-bearing
+    # v_Invitation_CurrentStatus below is the richer Tier 2, pending ConferenceImage.
     ViewCatalogEntry(
-        view_name="v_Attendee_Global",
+        view_name="v_EventInstance_Attendee",
+        object_type="attendeeConf",
+        id_column="RecordID",
+        id_columns=("AttendeeID", "EventInstanceID"),
+        title_columns=("CompanyName", "AttendeeCode"),
+        property_columns=(
+            "AttendeeID",
+            "EventInstanceID",
+            "CompanyName",
+            "AttendeeCode",
+            "AttendeeCodeType",
+        ),
+        watermark_column="UpdatedOn",
+        schema="rpt",
+    ),
+    # Tier 3 — per-conference detail. Composite ids keep each fact unique; EventInstanceID
+    # rides as a property. v_Catering_TableAssignment carries the person name (FormalName).
+    ViewCatalogEntry(
+        view_name="v_Catering_TableAssignment",
+        object_type="catering",
+        id_column="EventInstanceActivityID",
+        id_columns=("AttendeeID", "EventInstanceID", "EventInstanceActivityID"),
+        title_columns=("FormalName", "Activity"),  # "Jane Doe – Welcome Dinner"
+        property_columns=("AttendeeID", "EventInstanceID", "ActivityID"),
+        watermark_column=None,
+        schema="rpt",
+    ),
+    ViewCatalogEntry(
+        view_name="v_Activity_Attendee_TimeRange",
+        object_type="activityAttendee",
+        id_column="EventInstanceActivityID",
+        id_columns=("AttendeeID", "EventInstanceID", "EventInstanceActivityID"),
+        title_columns=(),
+        property_columns=("AttendeeID", "EventInstanceID", "ActivityID"),
+        watermark_column=None,
+        schema="rpt",
+    ),
+    ViewCatalogEntry(
+        view_name="v_TravelAir",
+        object_type="travelAir",
+        id_column="RecordID",
+        id_columns=("AttendeeID", "EventInstanceID", "RecordID"),
+        title_columns=("AirlineName", "FlightNumber"),
+        property_columns=("AttendeeID", "EventInstanceID", "TravelRecordTypeName", "TravelDate"),
+        watermark_column="UpdatedOn",
+        schema="rpt",
+    ),
+    ViewCatalogEntry(
+        view_name="v_TravelGround",
+        object_type="travelGround",
+        id_column="RecordID",
+        id_columns=("AttendeeID", "EventInstanceID", "RecordID"),
+        title_columns=("TravelMethodGroundName", "TravelDate"),
+        property_columns=("AttendeeID", "EventInstanceID", "TravelRecordTypeName", "TravelDate"),
+        watermark_column="UpdatedOn",
+        schema="rpt",
+    ),
+    # ══ Blocked on ConferenceImage — DISABLED (enable when the replica can read it) ══
+    # These carry the person NAME (best for "was <name> at <conference>?") but their
+    # definitions transitively read ConferenceImage.dbo.Attendee_Picture, so they do NOT
+    # bind here. Verified with scripts/probe_views.py.
+    ViewCatalogEntry(
+        view_name="v_Attendee_Global",  # Tier 1 — global identity
         object_type="attendee",
         id_column="AttendeeID",
         title_columns=("InformalName", "Company"),  # "Jane Doe – Acme Corp"
         property_columns=("AttendeeID",),
-        watermark_column=None,  # global view has no change-tracking column → full-fetch
+        watermark_column=None,
         schema="rpt",
+        enabled=False,  # ← needs ConferenceImage
     ),
-    # ── Tier 2 — Attendee @ Conference: one doc per (AttendeeID, EventInstanceID) ─
-    #    Self-sufficient (person name + conference code/name + status) so Glean can
-    #    answer "was <name> at <conference>?". EventInstanceID rides as a property.
     ViewCatalogEntry(
-        view_name="v_Invitation_CurrentStatus",
-        object_type="attendeeConf",
+        view_name="v_Invitation_CurrentStatus",  # Tier 2 (richer) — name + conf code + status
+        object_type="attendeeStatus",
         id_column="AttendeeID",
         id_columns=("AttendeeID", "EventInstanceID"),
         title_columns=("FormalName", "EventInstanceShort"),  # "Jane Doe – SV26"
@@ -114,56 +187,9 @@ VIEW_CATALOG: tuple[ViewCatalogEntry, ...] = (
             "InvitationStatus",
             "Company",
         ),
-        watermark_column=None,  # "current status" view; full-fetch (row-capped in test)
-        schema="rpt",
-    ),
-    # ── Tier 3 — per-conference detail (DISABLED for v1) ──────────────────────
-    #    Enable once Tier 1/2 dry-runs look good. Composite ids keep each fact unique;
-    #    EventInstanceID rides as a property for per-conference filtering. Confirm the
-    #    title/property columns against a dry-run before enabling.
-    ViewCatalogEntry(
-        view_name="v_TravelAir",
-        object_type="travelAir",
-        id_column="RecordID",
-        id_columns=("AttendeeID", "EventInstanceID", "RecordID"),
-        title_columns=("AirlineName", "FlightNumber"),
-        property_columns=("AttendeeID", "EventInstanceID", "TravelRecordTypeName", "TravelDate"),
-        watermark_column="UpdatedOn",
-        schema="rpt",
-        enabled=False,
-    ),
-    ViewCatalogEntry(
-        view_name="v_TravelGround",
-        object_type="travelGround",
-        id_column="RecordID",
-        id_columns=("AttendeeID", "EventInstanceID", "RecordID"),
-        title_columns=("TravelMethodGroundName", "TravelDate"),
-        property_columns=("AttendeeID", "EventInstanceID", "TravelRecordTypeName", "TravelDate"),
-        watermark_column="UpdatedOn",
-        schema="rpt",
-        enabled=False,
-    ),
-    ViewCatalogEntry(
-        view_name="v_Activity_Attendee_TimeRange",
-        object_type="activityAttendee",
-        id_column="EventInstanceActivityID",
-        id_columns=("AttendeeID", "EventInstanceID", "EventInstanceActivityID"),
-        title_columns=(),
-        property_columns=("AttendeeID", "EventInstanceID", "ActivityID"),
         watermark_column=None,
         schema="rpt",
-        enabled=False,
-    ),
-    ViewCatalogEntry(
-        view_name="v_Catering_TableAssignment",
-        object_type="catering",
-        id_column="EventInstanceActivityID",
-        id_columns=("AttendeeID", "EventInstanceID", "EventInstanceActivityID"),
-        title_columns=("Activity", "FormalName"),
-        property_columns=("AttendeeID", "EventInstanceID", "ActivityID"),
-        watermark_column=None,
-        schema="rpt",
-        enabled=False,
+        enabled=False,  # ← needs ConferenceImage
     ),
 )
 
