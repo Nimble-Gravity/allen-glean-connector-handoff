@@ -10,7 +10,7 @@ import logging
 import time
 import traceback
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
 import pyodbc
@@ -120,6 +120,57 @@ def main() -> int:
         raise
 
 
+def _fetch_documents(
+    specs: Iterable,
+    conn: pyodbc.Connection,
+    *,
+    datasource: str,
+    allowed_refs: list,
+    sync_state,
+    sync_store,
+    use_incremental: bool,
+    notify: Callable[..., None],
+) -> tuple[list, list[str], int]:
+    """Fetch + build documents across all view specs, resiliently.
+
+    A single view failing (e.g. a cross-DB binding error like ConferenceImage, or a
+    missing SELECT grant) must NOT abort the whole run — the view is logged, reported
+    (ErrorType.VIEW_FETCH), and skipped so the remaining views still index. Returns
+    ``(documents, failed_views, records_fetched)``.
+    """
+    documents: list = []
+    failed_views: list[str] = []
+    records = 0
+    for spec in specs:
+        since = sync_state.watermark_for(spec.view_name) if use_incremental else None
+        logger.info(
+            "Fetching %s (%s).",
+            spec.view_name,
+            f"incremental since {since}" if since else "full",
+        )
+        try:
+            docs, new_watermark = spec.build_documents(
+                conn,
+                datasource=datasource,
+                allowed_users=allowed_refs or None,
+                since=since,
+            )
+        except Exception as exc:
+            failed_views.append(spec.view_name)
+            logger.exception("View %s failed to fetch/build; skipping.", spec.view_name)
+            notify(
+                ErrorType.VIEW_FETCH,
+                f"View {spec.view_name} failed to fetch/build: {exc}",
+                detail=traceback.format_exc(),
+            )
+            continue
+        documents.extend(docs)
+        records += len(docs)
+        if sync_store.incremental and new_watermark is not None:
+            sync_state.set_watermark(spec.view_name, new_watermark, count=len(docs))
+    return documents, failed_views, records
+
+
 def _run(
     settings: ConnectorSettings,
     notify: Callable[..., None],
@@ -203,33 +254,36 @@ def _run(
         )
 
     documents: list = []
+    failed_views: list[str] = []
     if conn is not None:
         try:
-            for spec in build_view_specs(
+            specs = build_view_specs(
                 VIEW_CATALOG,
                 default_schema=db_settings.schema,
                 row_limit=settings.fetch_row_limit,
                 exclude_columns=settings.exclude_columns,
                 view_url_base=settings.view_url_base,
-            ):
-                since = sync_state.watermark_for(spec.view_name) if use_incremental else None
-                logger.info(
-                    "Fetching %s (%s).",
-                    spec.view_name,
-                    f"incremental since {since}" if since else "full",
-                )
-                docs, new_watermark = spec.build_documents(
-                    conn,
-                    datasource=datasource,
-                    allowed_users=allowed_refs or None,
-                    since=since,
-                )
-                documents.extend(docs)
-                state.records_fetched += len(docs)
-                if sync_store.incremental and new_watermark is not None:
-                    sync_state.set_watermark(spec.view_name, new_watermark, count=len(docs))
+            )
+            documents, failed_views, fetched = _fetch_documents(
+                specs,
+                conn,
+                datasource=datasource,
+                allowed_refs=allowed_refs,
+                sync_state=sync_state,
+                sync_store=sync_store,
+                use_incremental=use_incremental,
+                notify=notify,
+            )
+            state.records_fetched += fetched
         finally:
             conn.close()
+
+    if failed_views:
+        logger.warning(
+            "Skipped %d view(s) that failed to fetch/build: %s",
+            len(failed_views),
+            ", ".join(failed_views),
+        )
 
     # Glean rejects a bulk upload with duplicate document ids. Some views lack a
     # unique per-row key (see catalog TODOs), so collapse duplicates (last wins).

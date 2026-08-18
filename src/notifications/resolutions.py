@@ -15,6 +15,12 @@ _RESOLUTIONS: dict[ErrorType, str] = {
         "Set GLEAN_DATASOURCE, GLEAN_INSTANCE, and GLEAN_INDEXING_API_KEY in .env, "
         "or set GLEAN_ENABLE_INDEXING=false to run in export-only mode."
     ),
+    ErrorType.VIEW_FETCH: (
+        "A view failed to read/bind (e.g. a cross-database dependency such as "
+        "ConferenceImage, or missing SELECT permission). The run skipped it and "
+        "continued with the other views. Confirm the view is accessible on this "
+        "instance, or remove/replace it in views/catalog.py."
+    ),
     ErrorType.USER_INDEXING: (
         "Check the Glean Indexing API key and its permissions, then rerun. "
         "Document indexing still ran for this cycle."

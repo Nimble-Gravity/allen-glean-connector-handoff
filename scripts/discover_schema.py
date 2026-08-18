@@ -88,6 +88,23 @@ def _guess_watermark_column(columns: list[dict]) -> str | None:
     return dt[0]["name"] if dt else None
 
 
+def _cross_db_refs(cur: "pyodbc.Cursor", schema: str, name: str, other_dbs: list[str]) -> list[str]:
+    """Database names (other than the current DB) referenced in the view's definition.
+
+    A view that references another database (e.g. ConferenceImage) fails to BIND
+    (error 4413) when that database is not accessible from this connection, so a plain
+    ``SELECT *`` raises. ``OBJECT_DEFINITION`` returns the stored text even for a view
+    that cannot currently bind, so this detection works regardless.
+    """
+    try:
+        cur.execute("SELECT OBJECT_DEFINITION(OBJECT_ID(?))", [f"{schema}.{name}"])
+        row = cur.fetchone()
+        definition = str(row[0]) if row and row[0] else ""
+    except Exception:
+        return []
+    return sorted({db for db in other_dbs if re.search(rf"\b{re.escape(db)}\b", definition, re.I)})
+
+
 def _catalog_snippet(view: dict, default_schema: str) -> str:
     g = view["guessed"]
     titles = ", ".join(f'"{c}"' for c in g["title_columns"])
@@ -135,6 +152,16 @@ def main() -> int:
         found = [(s, n) for (s, n) in cur.fetchall() if s not in _SYSTEM_SCHEMAS]
         print(f"Found {len(found)} view(s):", ", ".join(sorted({s for s, _ in found})) or "(none)")
 
+        # Other databases on the server — used to flag cross-DB references in a view's
+        # definition (e.g. rpt.v_Attendee_Global -> ConferenceImage.dbo.Attendee_Picture),
+        # which fail to BIND (error 4413) if that database is not accessible here.
+        cur.execute("SELECT DB_NAME()")
+        current_db = str(cur.fetchone()[0])
+        cur.execute("SELECT name FROM sys.databases")
+        other_dbs = [
+            str(r[0]) for r in cur.fetchall() if r[0] and str(r[0]).lower() != current_db.lower()
+        ]
+
         for schema, name in found:
             cur.execute(
                 "SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, ORDINAL_POSITION "
@@ -157,6 +184,7 @@ def main() -> int:
                     "schema": schema,
                     "name": name,
                     "columns": columns,
+                    "cross_db_refs": _cross_db_refs(cur, schema, name, other_dbs),
                     "guessed": {
                         "id_column": _guess_id_column(columns),
                         "title_columns": _guess_title_columns(columns),
@@ -166,6 +194,15 @@ def main() -> int:
             )
     finally:
         conn.close()
+
+    flagged = [v for v in views if v.get("cross_db_refs")]
+    if flagged:
+        print(
+            f"\n⚠ {len(flagged)} view(s) reference another database — they will NOT bind "
+            "(error 4413) unless that DB is accessible from this connection:"
+        )
+        for v in sorted(flagged, key=lambda v: (v["schema"], v["name"])):
+            print(f"    {v['schema']}.{v['name']}  ->  {', '.join(v['cross_db_refs'])}")
 
     out_base = Path(os.environ.get("CONNECTOR_OUTPUT_DIR") or ROOT)
     out_dir = out_base / ".outputs"

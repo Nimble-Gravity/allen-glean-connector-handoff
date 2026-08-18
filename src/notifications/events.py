@@ -19,6 +19,7 @@ class ErrorType(StrEnum):
 
     DB_CONNECTION = "db_connection"
     GLEAN_PREREQS = "glean_prereqs"
+    VIEW_FETCH = "view_fetch"
     USER_INDEXING = "user_indexing"
     DOCUMENT_INDEXING = "document_indexing"
     API_STARTUP = "api_startup"
