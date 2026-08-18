@@ -40,16 +40,30 @@ def export_view_to_json(df: pd.DataFrame, view_name: str, excluded_columns: list
 
 def export_documents_to_json(documents: list, view_name: str) -> Path:
     """Write built DocumentDefinitions as JSON summaries to
-    .outputs/<view_name>_documents_<ts>.json."""
+    .outputs/<view_name>_documents_<ts>.json.
+
+    A faithful preview of what the live push sends: includes the ``viewUrl`` and
+    ``customProperties`` (e.g. EventInstanceID) alongside id/title/body, so a dry run
+    surfaces exactly what Glean will receive.
+    """
     output_dir = _outputs_dir()
     output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%S")
     output_path = output_dir / f"{view_name}_documents_{timestamp}.json"
-    records = [
-        {"id": doc.id, "title": doc.title, "body": json.loads(doc.body.text_content)}
-        for doc in documents
-    ]
+    records = [_document_summary(doc) for doc in documents]
     with output_path.open("w", encoding="utf-8") as fh:
         json.dump(records, fh, indent=2, ensure_ascii=False)
     logger.info("Exported %s document summaries to %s", len(records), output_path)
     return output_path
+
+
+def _document_summary(doc) -> dict:
+    """A JSON-friendly summary of a built DocumentDefinition for dry-run inspection."""
+    props = getattr(doc, "custom_properties", None) or []
+    return {
+        "id": doc.id,
+        "title": doc.title,
+        "viewUrl": getattr(doc, "view_url", None),
+        "customProperties": [{"name": p.name, "value": p.value} for p in props],
+        "body": json.loads(doc.body.text_content),
+    }

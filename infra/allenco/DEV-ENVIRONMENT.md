@@ -145,14 +145,13 @@ VIEW_URL_BASE=https://ems.allenco.com   # per-doc viewURL; MUST match the dataso
 # email (org-wide visible — DEV/TEST ONLY). One of the two is required.
 GLEAN_INDEXING_SUPERUSER_ALLOWED_USERS=          # e.g. ["admin@allenco.com"] — optional if anonymous below
 GLEAN_ALLOW_ANONYMOUS_ACCESS=true                # DEV/TEST ONLY; prod uses the AD groups view
-FETCH_ROW_LIMIT=25            # rows per view (v1 = 2 enabled: attendee + attendeeConf) ~= 50 docs
+FETCH_ROW_LIMIT=25            # rows per view (v1 = 5 enabled binds-today views) ~= 250 docs
 GLEAN_FULL_REFRESH=true       # datasource = exactly this batch (replaceable)
-# PII: mirror the Salesforce connector's exclusions. KEEP dietary/allergy — the client
-# says it is a MUST-HAVE (catering), so it is NO LONGER excluded. EXCLUDE_COLUMNS is an
-# EXACT (case-insensitive) column-name match. The list below is reconciled to the real
-# rpt.v_Attendee_Global / travel columns (raw birthdate + driver-license/legal-ID fields);
-# extend it as more views are enabled.
-EXCLUDE_COLUMNS=DOB,LicenseDOB,LicenseNumber,LicenseName,LicenseState,LicenseStateShort,LicenseExpirationDate,LicenseCountry
+# PII: KEEP dietary/allergy — the client says it is a MUST-HAVE (catering). EXCLUDE_COLUMNS
+# entries are case-insensitive GLOBS, so one pattern catches every variant — `License*`
+# drops LicenseName, LicenseState, LicenseCountryName, LicenseDOB, … (the travel views have
+# many). Prefer globs over enumerating names (an exact list leaks the variants it forgets).
+EXCLUDE_COLUMNS=DOB,License*,Passport*,SSN,NationalID
 SYNC_STATE_BACKEND=none
 GLEAN_ENABLE_INDEXING=false   # start with a dry run (step 1)
 ```

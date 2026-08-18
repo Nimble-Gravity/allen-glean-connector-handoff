@@ -9,6 +9,7 @@ from glean_index.index_documents import (
     dedupe_documents_by_id,
     set_anonymous_access_where_missing,
 )
+from helpers.json_export import _document_summary
 
 
 def test_builds_one_document_per_row():
@@ -178,9 +179,56 @@ def test_exclude_columns_dropped_from_body_case_insensitive():
         datasource="ds",
         id_column="AttendeeID",
         title_columns=("FirstName",),
-        exclude_columns=("dob",),  # case-insensitive
+        exclude_columns=("dob",),  # exact, case-insensitive
     )
     body = json.loads(docs[0].body.text_content)
     assert "DOB" not in body  # sensitive column redacted
     assert body["FirstName"] == "Ada"
     assert body["AttendeeID"] == 1
+
+
+def test_exclude_columns_glob_drops_all_license_variants():
+    # A wildcard pattern must catch every license column, incl. ones an exact list misses.
+    df = pd.DataFrame(
+        [
+            {
+                "AttendeeID": 1,
+                "LicenseName": "X",
+                "LicenseState": "CA",
+                "LicenseCountryName": "US",
+                "DietaryAllergyComments": "peanuts",
+                "FirstName": "Ada",
+            }
+        ]
+    )
+    docs = rows_to_documents(
+        df,
+        object_type="travelGround",
+        datasource="ds",
+        id_column="AttendeeID",
+        title_columns=(),
+        exclude_columns=("License*", "DOB"),
+    )
+    body = json.loads(docs[0].body.text_content)
+    assert "LicenseName" not in body
+    assert "LicenseState" not in body
+    assert "LicenseCountryName" not in body  # glob catches the variant an exact list would miss
+    assert body["DietaryAllergyComments"] == "peanuts"  # dietary/allergy kept (must-have)
+    assert body["FirstName"] == "Ada"
+
+
+def test_document_summary_includes_viewurl_and_custom_properties():
+    docs = rows_to_documents(
+        pd.DataFrame([{"AttendeeID": 1, "EventInstanceID": "SV26"}]),
+        object_type="attendeeConf",
+        datasource="ds",
+        id_column="AttendeeID",
+        id_columns=("AttendeeID", "EventInstanceID"),
+        title_columns=(),
+        property_columns=("EventInstanceID",),
+        view_url_base="https://ems.allenco.com",
+    )
+    summary = _document_summary(docs[0])
+    assert summary["id"] == "attendeeConf:1:SV26"
+    assert summary["viewUrl"] == "https://ems.allenco.com/attendeeConf/1:SV26"
+    assert summary["customProperties"] == [{"name": "EventInstanceID", "value": "SV26"}]

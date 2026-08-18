@@ -7,6 +7,7 @@ mirror SMART's ``views/daily_financial_extract/document_builder.py`` for the
 richer pattern.
 """
 
+import fnmatch
 import logging
 from collections.abc import Iterable, Sequence
 from typing import Any
@@ -39,8 +40,10 @@ def rows_to_documents(
 
     Tolerant of missing columns: falls back to the row position for the id and to
     ``object_type`` for the title so a view builds even before the real EMS column
-    names are confirmed. ``exclude_columns`` (case-insensitive) are dropped from the
-    document body — e.g. PII fields not cleared for indexing.
+    names are confirmed. ``exclude_columns`` are dropped from the document body — e.g.
+    PII fields not cleared for indexing. Each entry is a **case-insensitive glob**, so
+    a pattern like ``License*`` drops every license column (LicenseName, LicenseState,
+    LicenseCountryName, …) — exact names (no wildcard) still match exactly.
 
     ``id_columns`` (when non-empty) builds a **composite** row key from several
     columns' values joined by ``:`` — use it for per-conference documents keyed by
@@ -57,7 +60,7 @@ def rows_to_documents(
     ``view_url`` is given). Replace the base with the real EMS/portal URL later.
     """
     allowed = list(allowed_users or [])
-    excluded = {c.strip().lower() for c in exclude_columns if c.strip()}
+    exclude_patterns = [c.strip().lower() for c in exclude_columns if c.strip()]
     url_base = (view_url_base or "").rstrip("/")
     docs: list[DocumentDefinition] = []
 
@@ -65,7 +68,7 @@ def rows_to_documents(
         payload = {
             key: _jsonable(value)
             for key, value in row.to_dict().items()
-            if key.lower() not in excluded
+            if not _is_excluded(key, exclude_patterns)
         }
         row_key = _row_key(row, id_columns, id_column)
         # Prefix with object_type so ids stay unique ACROSS views that reuse a column
@@ -74,7 +77,8 @@ def rows_to_documents(
         document_id = f"{object_type}:{row_key or position}"
 
         title_parts = [str(row[c]) for c in title_columns if c in row and pd.notna(row[c])]
-        title = " – ".join(title_parts) if title_parts else f"{object_type} {document_id}"
+        # Fall back to the id (already prefixed with object_type) rather than repeating it.
+        title = " – ".join(title_parts) if title_parts else document_id
 
         doc_view_url = view_url
         if not doc_view_url and url_base:
@@ -112,6 +116,16 @@ def _row_key(row: pd.Series, id_columns: Sequence[str], id_column: str) -> str:
         str(row[c]).strip() for c in cols if c in row and pd.notna(row[c]) and str(row[c]).strip()
     ]
     return ":".join(parts)
+
+
+def _is_excluded(column: str, patterns: Sequence[str]) -> bool:
+    """True if a column name matches any EXCLUDE_COLUMNS glob (case-insensitive).
+
+    ``patterns`` are pre-lowercased; a wildcard entry like ``license*`` drops every
+    license column, while a plain name matches only that exact column.
+    """
+    name = column.lower()
+    return any(fnmatch.fnmatchcase(name, pattern) for pattern in patterns)
 
 
 def _jsonable(value: Any) -> Any:
