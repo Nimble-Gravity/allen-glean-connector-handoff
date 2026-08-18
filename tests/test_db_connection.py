@@ -1,6 +1,14 @@
-"""Tests for the Azure MI connection-string builder (auth modes + TLS)."""
+"""Tests for the Azure MI connection-string builder (auth modes + TLS) and the
+DATETIMEOFFSET output converter."""
 
-from allenco_connector.db_connection import build_connection_string
+import struct
+from datetime import UTC, datetime, timedelta
+
+from allenco_connector.db_connection import (
+    SQL_SS_TIMESTAMPOFFSET,
+    build_connection_string,
+    handle_datetimeoffset,
+)
 from config.config import (
     AUTH_MODE_DEFAULT,
     AUTH_MODE_MSI,
@@ -86,3 +94,21 @@ def test_port_zero_omits_port_from_server():
     cs = build_connection_string(_settings(server="ALC-AZR-SQL-001", port=0))
     assert "SERVER=ALC-AZR-SQL-001;" in cs
     assert "ALC-AZR-SQL-001,0" not in cs
+
+
+def test_datetimeoffset_converter_decodes_utc():
+    # 20-byte SQL_SS_TIMESTAMPOFFSET: y,mo,d,h,mi,s, ns, tz_h, tz_m
+    raw = struct.pack("<6hI2h", 2026, 8, 18, 14, 30, 45, 123456000, 0, 0)
+    got = handle_datetimeoffset(raw)
+    assert got == datetime(2026, 8, 18, 14, 30, 45, 123456, tzinfo=UTC)
+
+
+def test_datetimeoffset_converter_decodes_negative_offset():
+    raw = struct.pack("<6hI2h", 2026, 1, 2, 3, 4, 5, 0, -5, 0)
+    got = handle_datetimeoffset(raw)
+    assert got.utcoffset() == timedelta(hours=-5)
+    assert got.replace(tzinfo=None) == datetime(2026, 1, 2, 3, 4, 5)  # wall-clock preserved
+
+
+def test_sql_ss_timestampoffset_constant_is_minus_155():
+    assert SQL_SS_TIMESTAMPOFFSET == -155

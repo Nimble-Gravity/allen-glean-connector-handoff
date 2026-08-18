@@ -13,7 +13,9 @@ one-shot script where pooling adds overhead with no benefit.
 """
 
 import logging
+import struct
 import time
+from datetime import datetime, timedelta, timezone
 
 import pyodbc
 
@@ -27,6 +29,17 @@ logger = logging.getLogger(__name__)
 _DEFAULT_CONNECT_TIMEOUT = 30
 _DEFAULT_RETRY_ATTEMPTS = 3
 _DEFAULT_RETRY_DELAY = 5.0
+
+# SQL Server DATETIMEOFFSET arrives as SQL_SS_TIMESTAMPOFFSET (-155), which pyodbc has
+# no built-in decoder for — a fetch of such a column raises "-155 is not supported".
+# Mirror of allenco_connector.db_connection (keep the two in sync).
+SQL_SS_TIMESTAMPOFFSET = -155
+
+
+def handle_datetimeoffset(raw: bytes) -> datetime:
+    """Decode a SQL Server DATETIMEOFFSET value to a timezone-aware datetime."""
+    y, mo, d, h, mi, s, ns, tz_h, tz_m = struct.unpack("<6hI2h", raw)
+    return datetime(y, mo, d, h, mi, s, ns // 1000, timezone(timedelta(hours=tz_h, minutes=tz_m)))
 
 
 def build_connection_string(settings: DbSettings) -> str:
@@ -87,6 +100,8 @@ def get_connection(
     for attempt in range(1, retry_attempts + 1):
         try:
             conn = pyodbc.connect(connection_string, timeout=connect_timeout)
+            # Teach pyodbc to decode DATETIMEOFFSET columns (else fetch raises -155).
+            conn.add_output_converter(SQL_SS_TIMESTAMPOFFSET, handle_datetimeoffset)
             logger.info(
                 "Connected to Azure SQL MI '%s' (auth=%s, attempt %d/%d)",
                 settings.server,

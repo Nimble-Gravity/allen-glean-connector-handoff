@@ -34,7 +34,7 @@ load_dotenv(dotenv_path=ROOT / ".env", override=True)
 
 import pyodbc  # noqa: E402
 
-from allenco_connector.db_connection import build_connection_string  # noqa: E402
+from allenco_connector.db_connection import get_connection  # noqa: E402
 from allenco_connector.views.catalog import VIEW_CATALOG  # noqa: E402
 from config.config import load_db_settings  # noqa: E402
 
@@ -80,7 +80,9 @@ def main() -> int:
         print("CONFIG ERROR:", exc)
         return 2
     try:
-        conn = pyodbc.connect(build_connection_string(settings), timeout=15)
+        # get_connection registers the DATETIMEOFFSET output converter, so the probe
+        # reflects the real connector (a -155 column no longer shows a false FAIL).
+        conn = get_connection(settings, connect_timeout=15, retry_attempts=1)
     except Exception as exc:
         print("RESULT: FAIL (could not connect):", str(exc)[:300])
         return 1
