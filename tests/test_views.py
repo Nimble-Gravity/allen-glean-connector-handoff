@@ -104,6 +104,72 @@ def test_dedupe_documents_by_id_collapses_duplicates():
     assert sorted(d.id for d in deduped) == ["attendee:1", "attendee:2"]
 
 
+def test_id_columns_builds_composite_key_unique_per_row():
+    # Two flights for the same attendee: a single AttendeeID key would collide and be
+    # deduped away; the composite (AttendeeID, EventInstanceID, FlightNo) stays unique.
+    df = pd.DataFrame(
+        [
+            {"AttendeeID": 1, "EventInstanceID": "SV26", "FlightNo": "AA100"},
+            {"AttendeeID": 1, "EventInstanceID": "SV26", "FlightNo": "AA200"},
+        ]
+    )
+    docs = rows_to_documents(
+        df,
+        object_type="travelAir",
+        datasource="ds",
+        id_column="AttendeeID",
+        id_columns=("AttendeeID", "EventInstanceID", "FlightNo"),
+        title_columns=(),
+    )
+    ids = [d.id for d in docs]
+    assert ids == ["travelAir:1:SV26:AA100", "travelAir:1:SV26:AA200"]
+    deduped, dropped = dedupe_documents_by_id(docs)
+    assert dropped == 0  # composite key prevents the collision
+
+
+def test_id_columns_skips_null_parts_and_falls_back_to_position():
+    df = pd.DataFrame([{"AttendeeID": None, "EventInstanceID": None}])
+    docs = rows_to_documents(
+        df,
+        object_type="attendeeConf",
+        datasource="ds",
+        id_column="AttendeeID",
+        id_columns=("AttendeeID", "EventInstanceID"),
+        title_columns=(),
+    )
+    assert docs[0].id == "attendeeConf:0"  # all key parts null → row position
+
+
+def test_property_columns_emit_custom_properties_and_stay_in_body():
+    df = pd.DataFrame([{"AttendeeID": 1, "EventInstanceID": "SV26", "FirstName": "Ada"}])
+    docs = rows_to_documents(
+        df,
+        object_type="attendeeConf",
+        datasource="ds",
+        id_column="AttendeeID",
+        title_columns=("FirstName",),
+        property_columns=("EventInstanceID", "AttendeeID"),
+    )
+    props = {p.name: p.value for p in docs[0].custom_properties}
+    assert props == {"EventInstanceID": "SV26", "AttendeeID": 1}  # filterable metadata
+    body = json.loads(docs[0].body.text_content)
+    assert body["EventInstanceID"] == "SV26"  # also still in the body
+
+
+def test_property_columns_skip_missing_and_null():
+    df = pd.DataFrame([{"AttendeeID": 1, "EventInstanceID": None}])
+    docs = rows_to_documents(
+        df,
+        object_type="attendeeConf",
+        datasource="ds",
+        id_column="AttendeeID",
+        title_columns=(),
+        property_columns=("EventInstanceID", "MissingCol"),
+    )
+    # null EventInstanceID and absent MissingCol both skipped → no custom properties
+    assert docs[0].custom_properties == []
+
+
 def test_exclude_columns_dropped_from_body_case_insensitive():
     df = pd.DataFrame([{"AttendeeID": 1, "DOB": "1990-01-01", "FirstName": "Ada"}])
     docs = rows_to_documents(

@@ -93,17 +93,26 @@ DB_PASSWORD=<dev-sql-password>
 python scripts\check_db.py        # expect RESULT: PASS
 ```
 
-**3. Discover the real schema** — lists every view + columns and prints ready-to-paste
-catalog entries with guessed id / title / watermark columns:
+**3. Discover the real schema** — lists **every** view across **all** schemas + columns and prints
+ready-to-paste catalog entries with guessed id / title / watermark columns:
 
 ```powershell
 python scripts\discover_schema.py   # writes .outputs\schema.json, prints VIEW_CATALOG snippets
 ```
 
-Paste the printed entries into `src\allenco_connector\views\catalog.py` (replacing the seed
-`VIEW_CATALOG`), then **confirm each guessed column** (`id_column`, `title_columns`,
-`watermark_column`) against `schema.json`. Set `DB_SCHEMA` to the real schema so the entries
-inherit it. Commit the catalog change from the Mac; pull it here.
+Target the **`rpt`** schema (report-optimized, already-joined views — the client's recommendation),
+**not** the raw `cnf` views. From `schema.json`, identify for the layered model
+(`docs/document-model.md`):
+  - an `rpt` view at **attendee-global** grain → Tier 1 (`attendee`);
+  - the **attendee × conference** grain → Tier 2 (`attendeeConf`): needs `AttendeeID`,
+    `EventInstanceID`, and a conference code/name (from `EventInstance`; current = `IsDefault = 1`);
+  - `rpt` travel / lodging / activity / catering views → Tier 3 detail (fast-follow).
+
+Paste the entries into `src\allenco_connector\views\catalog.py`, then set the new fields: use
+**`id_columns=("AttendeeID","EventInstanceID", …)`** for a composite key (kills the duplicate-id
+drops) and **`property_columns=("EventInstanceID", …)`** so Glean can filter per conference. Confirm
+each guessed column against `schema.json`. **Send `.outputs\schema.json` back to the Mac** so the
+catalog can be finalized there. (Any DB object you create → log it in `docs/schema-changes.md`.)
 
 **4. Dry-run against the real views** — builds real documents, no push to Glean:
 
@@ -138,7 +147,11 @@ GLEAN_INDEXING_SUPERUSER_ALLOWED_USERS=          # e.g. ["admin@allenco.com"] �
 GLEAN_ALLOW_ANONYMOUS_ACCESS=true                # DEV/TEST ONLY; prod uses the AD groups view
 FETCH_ROW_LIMIT=25            # rows per view (10 enabled) ~= 250 docs
 GLEAN_FULL_REFRESH=true       # datasource = exactly this batch (replaceable)
-EXCLUDE_COLUMNS=DOB,LicenseNumber,LicenseExpirationDate,LicenseDOB,DietaryAllergyComments,RSVPDietaryAllergyComments
+# PII: mirror the Salesforce connector's exclusions. KEEP dietary/allergy — the client
+# says it is a MUST-HAVE (catering), so it is NO LONGER excluded. EXCLUDE_COLUMNS is an
+# EXACT (case-insensitive) column-name match, so reconcile these against .outputs/schema.json
+# — the list below is a conservative template (identity / legal / travel-doc fields), not final.
+EXCLUDE_COLUMNS=DOB,LicenseNumber,LicenseExpirationDate,LicenseDOB,LicenseState,PassportNumber,PassportExpiration,PassportCountry,KnownTravelerNumber,RedressNumber,SSN,NationalID
 SYNC_STATE_BACKEND=none
 GLEAN_ENABLE_INDEXING=false   # start with a dry run (step 1)
 ```

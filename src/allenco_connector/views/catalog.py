@@ -47,7 +47,12 @@ class ViewCatalogEntry:
     view_name:        the SQL view name (without schema brackets).
     object_type:      Glean object type + document-id prefix (e.g. "attendee").
     id_column:        column used as the stable per-row document id.
+    id_columns:       composite key columns (joined by ":") — overrides id_column.
+                      Use for per-conference docs keyed by (AttendeeID,
+                      EventInstanceID) and for junction rows with no single key.
     title_columns:    columns concatenated (" – ") into the document title.
+    property_columns: columns emitted as Glean custom properties (filterable
+                      metadata, e.g. EventInstanceID) as well as in the body.
     watermark_column: change-tracking column for incremental sync, or None to
                       always full-fetch this view.
     schema:           SQL schema; None inherits the run's DB_SCHEMA default.
@@ -58,7 +63,9 @@ class ViewCatalogEntry:
     view_name: str
     object_type: str
     id_column: str
+    id_columns: tuple[str, ...] = ()
     title_columns: tuple[str, ...] = ()
+    property_columns: tuple[str, ...] = ()
     watermark_column: str | None = "ModifiedDate"
     schema: str | None = None
     enabled: bool = True  # False → skipped by build_view_specs (not fetched/indexed)
@@ -191,7 +198,9 @@ def _generic_builder(
             object_type=entry.object_type,
             datasource=datasource,
             id_column=entry.id_column,
+            id_columns=entry.id_columns,
             title_columns=entry.title_columns,
+            property_columns=entry.property_columns,
             allowed_users=allowed_users,
             view_url_base=view_url_base,
             exclude_columns=exclude_columns,

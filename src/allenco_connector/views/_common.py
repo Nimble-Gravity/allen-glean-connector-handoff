@@ -12,6 +12,7 @@ from collections.abc import Iterable, Sequence
 from typing import Any
 
 import pandas as pd
+from glean.api_client.models.customproperty import CustomProperty
 from glean.api_client.models.documentdefinition import DocumentDefinition
 from glean.api_client.models.userreferencedefinition import UserReferenceDefinition
 
@@ -27,17 +28,29 @@ def rows_to_documents(
     datasource: str,
     id_column: str,
     title_columns: Sequence[str],
+    id_columns: Sequence[str] = (),
+    property_columns: Sequence[str] = (),
     allowed_users: Iterable[UserReferenceDefinition] | None = None,
     view_url: str | None = None,
     view_url_base: str = "",
     exclude_columns: Sequence[str] = (),
 ) -> list[DocumentDefinition]:
-    """Build one Glean document per DataFrame row (generic skeleton mapping).
+    """Build one Glean document per DataFrame row (generic mapping).
 
     Tolerant of missing columns: falls back to the row position for the id and to
-    ``object_type`` for the title so a stub view builds even before the real EMS
-    column names are confirmed. ``exclude_columns`` (case-insensitive) are dropped
-    from the document body — e.g. PII fields not cleared for indexing.
+    ``object_type`` for the title so a view builds even before the real EMS column
+    names are confirmed. ``exclude_columns`` (case-insensitive) are dropped from the
+    document body — e.g. PII fields not cleared for indexing.
+
+    ``id_columns`` (when non-empty) builds a **composite** row key from several
+    columns' values joined by ``:`` — use it for per-conference documents keyed by
+    ``(AttendeeID, EventInstanceID)`` and for junction rows without a single unique
+    key (avoids the collisions that force post-hoc dedup). It takes precedence over
+    ``id_column``.
+
+    ``property_columns`` are emitted as Glean **custom properties** (filterable
+    metadata) in addition to appearing in the body — e.g. ``EventInstanceID`` so the
+    assistant can answer "was X at conference Y?". Missing/null values are skipped.
 
     Glean requires a non-empty viewURL per document. When ``view_url_base`` is set, a
     per-row URL ``{base}/{object_type}/{key}`` is stamped (unless an explicit
@@ -54,11 +67,10 @@ def rows_to_documents(
             for key, value in row.to_dict().items()
             if key.lower() not in excluded
         }
-        raw_id = row[id_column] if id_column in row else None
-        row_key = str(raw_id).strip() if raw_id is not None and pd.notna(raw_id) else ""
+        row_key = _row_key(row, id_columns, id_column)
         # Prefix with object_type so ids stay unique ACROSS views that reuse a column
-        # name (several cnf views key on RecordID). Uniqueness WITHIN a view still
-        # depends on id_column being a real per-row key (see the catalog's TODOs).
+        # name (several views key on RecordID). Uniqueness WITHIN a view depends on the
+        # key columns being a real per-row key — use id_columns for composite keys.
         document_id = f"{object_type}:{row_key or position}"
 
         title_parts = [str(row[c]) for c in title_columns if c in row and pd.notna(row[c])]
@@ -67,6 +79,12 @@ def rows_to_documents(
         doc_view_url = view_url
         if not doc_view_url and url_base:
             doc_view_url = f"{url_base}/{object_type}/{row_key or position}"
+
+        custom_properties = [
+            CustomProperty(name=col, value=_jsonable(row[col]))
+            for col in property_columns
+            if col in row and pd.notna(row[col])
+        ]
 
         docs.append(
             build_document(
@@ -77,11 +95,23 @@ def rows_to_documents(
                 view_url=doc_view_url,
                 body_payload=payload,
                 allowed_users=allowed or None,
+                custom_properties=custom_properties or None,
             )
         )
 
     logger.info("rows_to_documents[%s]: built %d document(s).", object_type, len(docs))
     return docs
+
+
+def _row_key(row: pd.Series, id_columns: Sequence[str], id_column: str) -> str:
+    """The per-row id fragment: a ``:``-joined composite of ``id_columns`` (skipping
+    missing/null values) when given, else the single ``id_column``. Empty when no key
+    column is present (caller falls back to the row position)."""
+    cols = list(id_columns) if id_columns else [id_column]
+    parts = [
+        str(row[c]).strip() for c in cols if c in row and pd.notna(row[c]) and str(row[c]).strip()
+    ]
+    return ":".join(parts)
 
 
 def _jsonable(value: Any) -> Any:
