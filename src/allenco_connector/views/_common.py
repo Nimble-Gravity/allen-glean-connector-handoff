@@ -84,8 +84,10 @@ def rows_to_documents(
         if not doc_view_url and url_base:
             doc_view_url = f"{url_base}/{object_type}/{row_key or position}"
 
+        # Values are stringified: the datasource declares every custom property as TEXT
+        # (see scripts/setup_datasource.py), so ints/dates go up as strings to match.
         custom_properties = [
-            CustomProperty(name=col, value=_jsonable(row[col]))
+            CustomProperty(name=col, value=str(_jsonable(row[col])))
             for col in property_columns
             if col in row and pd.notna(row[col])
         ]

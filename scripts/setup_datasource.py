@@ -58,10 +58,34 @@ def main() -> int:
     )
     display_name = (os.environ.get("DATASOURCE_DISPLAY_NAME") or "Allen & Co EMS").strip()
 
-    object_types = sorted({e.object_type for e in VIEW_CATALOG if e.enabled})
+    # Aggregate the custom-property names per enabled object type. Glean rejects a
+    # document whose custom properties are not DECLARED on the object definition
+    # ("Property definitions not found for object types: ..."), so every property_columns
+    # entry from the catalog must be registered here. All declared as TEXT (the connector
+    # sends property values as strings) — enough for per-conference faceting/filtering.
+    props_by_type: dict[str, list[str]] = {}
+    for e in VIEW_CATALOG:
+        if not e.enabled:
+            continue
+        cols = props_by_type.setdefault(e.object_type, [])
+        for col in e.property_columns:
+            if col not in cols:
+                cols.append(col)
+
+    object_types = sorted(props_by_type)
     object_definitions = [
         models.ObjectDefinition(
-            name=ot, display_label=_label(ot), doc_category=models.DocCategory.CRM
+            name=ot,
+            display_label=_label(ot),
+            doc_category=models.DocCategory.CRM,
+            property_definitions=[
+                models.PropertyDefinition(
+                    name=col,
+                    display_label=_label(col),
+                    property_type=models.PropertyDefinitionPropertyType.TEXT,
+                )
+                for col in props_by_type[ot]
+            ],
         )
         for ot in object_types
     ]
@@ -69,7 +93,8 @@ def main() -> int:
 
     print("GLEAN_DATASOURCE :", datasource)
     print("urlRegex         :", url_regex)
-    print("object types     :", ", ".join(object_types))
+    for ot in object_types:
+        print(f"  object type '{ot}' props: {', '.join(props_by_type[ot]) or '(none)'}")
 
     try:
         client = get_glean_client(GleanConfig.from_env())

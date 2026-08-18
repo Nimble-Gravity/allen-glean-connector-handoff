@@ -152,9 +152,11 @@ def test_property_columns_emit_custom_properties_and_stay_in_body():
         property_columns=("EventInstanceID", "AttendeeID"),
     )
     props = {p.name: p.value for p in docs[0].custom_properties}
-    assert props == {"EventInstanceID": "SV26", "AttendeeID": 1}  # filterable metadata
+    # custom-property values go up as strings (declared TEXT on the datasource)
+    assert props == {"EventInstanceID": "SV26", "AttendeeID": "1"}
     body = json.loads(docs[0].body.text_content)
-    assert body["EventInstanceID"] == "SV26"  # also still in the body
+    assert body["EventInstanceID"] == "SV26"  # body keeps the native value
+    assert body["AttendeeID"] == 1
 
 
 def test_property_columns_skip_missing_and_null():
