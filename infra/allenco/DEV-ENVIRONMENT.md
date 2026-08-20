@@ -126,6 +126,12 @@ $env:GLEAN_ENABLE_INDEXING = "false"; $env:PYTHONPATH = "src"; python -m main
 that mirrors the directory. Until then, documents carry only superuser ACLs
 (`GLEAN_INDEXING_SUPERUSER_ALLOWED_USERS`). See `.env.example` for all keys.
 
+> **Custom DB objects → the `glean` schema (client convention).** If we ever need to create a
+> DB object (a helper view for the groups/ACL source, a stored procedure, etc.), create it under
+> a dedicated **`glean`** schema so every custom object lives in one place and is easy to find /
+> restore after a replication reset (which wipes objects we add — see `docs/schema-changes.md`).
+> For the groups view that means `DB_GROUPS_VIEW=<name>` + `DB_GROUPS_SCHEMA=glean`.
+
 ---
 
 ## Controlled live-indexing test (small, replaceable batch)
@@ -139,7 +145,11 @@ Verify the Glean push end-to-end **without flooding Glean or over-exposing PII**
 GLEAN_INSTANCE=<instance>
 GLEAN_INDEXING_API_KEY=<token>
 GLEAN_DATASOURCE=ems
-VIEW_URL_BASE=https://ems.allenco.com   # per-doc viewURL; MUST match the datasource's urlRegex in Glean
+# Deep-link target. The client's EMS has NO per-record page (hash-route SPA), so every
+# document links to the single home landing (client-confirmed). VIEW_URL (fixed) OVERRIDES
+# VIEW_URL_BASE (per-record). setup_datasource.py derives a matching, fragment-tolerant urlRegex.
+VIEW_URL=http://ems3/#/home
+VIEW_URL_BASE=https://ems.allenco.com   # fallback per-record base (unused while VIEW_URL is set)
 # Every document needs a permission. Either name a real Glean user (who can then SEE
 # the docs), OR set GLEAN_ALLOW_ANONYMOUS_ACCESS=true for a self-service test with no
 # email (org-wide visible — DEV/TEST ONLY). One of the two is required.

@@ -263,6 +263,7 @@ def _run(
                 row_limit=settings.fetch_row_limit,
                 exclude_columns=settings.exclude_columns,
                 view_url_base=settings.view_url_base,
+                view_url=settings.view_url,
             )
             documents, failed_views, fetched = _fetch_documents(
                 specs,

@@ -52,8 +52,15 @@ class ConnectorSettings:
 
     # Base URL stamped as each document's viewURL (VIEW_URL_BASE). Glean REQUIRES a
     # non-empty viewURL. Placeholder default until the real EMS/portal URL is known;
-    # must match the datasource's urlRegex in Glean.
+    # must match the datasource's urlRegex in Glean. Used only when ``view_url`` is unset.
     view_url_base: str = "https://ems.allenco.com"
+
+    # A SINGLE fixed viewURL used verbatim for EVERY document (VIEW_URL). Set this when
+    # the app has no per-record page — the client's EMS is a hash-route SPA with only a
+    # home landing (http://ems3/#/home), so every result deep-links there. When set it
+    # OVERRIDES view_url_base (no per-row {base}/{object_type}/{key} is built). Empty =
+    # fall back to per-row URLs from view_url_base.
+    view_url: str = ""
 
     # DEV/TEST ONLY (GLEAN_ALLOW_ANONYMOUS_ACCESS): grant org-wide (anonymous) access
     # to documents that would otherwise have no ACL, so a test can index without
@@ -210,6 +217,7 @@ def load_connector_settings() -> ConnectorSettings:
         exclude_columns=_read_csv_env("EXCLUDE_COLUMNS"),
         view_url_base=_read_str_env("VIEW_URL_BASE", default="https://ems.allenco.com")
         or "https://ems.allenco.com",
+        view_url=_read_str_env("VIEW_URL"),
         glean_allow_anonymous_access=_read_bool_env("GLEAN_ALLOW_ANONYMOUS_ACCESS", default=False),
     )
 

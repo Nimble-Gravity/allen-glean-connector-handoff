@@ -94,6 +94,23 @@ def test_view_url_base_stamps_per_row_url():
     assert docs[0].view_url == "https://ems.allenco.com/attendee/7"
 
 
+def test_fixed_view_url_stamped_verbatim_and_overrides_base():
+    # The client's EMS has no per-record page: every doc deep-links to one fixed URL
+    # (http://ems3/#/home). A fixed view_url must be used verbatim on EVERY row and
+    # take precedence over the per-row view_url_base.
+    df = pd.DataFrame([{"AttendeeID": 1}, {"AttendeeID": 2}])
+    docs = rows_to_documents(
+        df,
+        object_type="attendeeConf",
+        datasource="ds",
+        id_column="AttendeeID",
+        title_columns=(),
+        view_url="http://ems3/#/home",
+        view_url_base="https://ignored.example.com",
+    )
+    assert [d.view_url for d in docs] == ["http://ems3/#/home", "http://ems3/#/home"]
+
+
 def test_dedupe_documents_by_id_collapses_duplicates():
     # two rows share AttendeeID=1 → same document id "attendee:1"
     df = pd.DataFrame([{"AttendeeID": 1}, {"AttendeeID": 1}, {"AttendeeID": 2}])

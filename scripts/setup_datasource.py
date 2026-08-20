@@ -56,6 +56,10 @@ def main() -> int:
     view_url_base = (
         (os.environ.get("VIEW_URL_BASE") or "https://ems.allenco.com").strip().rstrip("/")
     )
+    # A single fixed viewURL (VIEW_URL) — the client's EMS is a hash-route SPA with only a
+    # home landing (http://ems3/#/home), so every document deep-links there verbatim
+    # (overrides the per-record view_url_base). See config.ConnectorSettings.view_url.
+    view_url = (os.environ.get("VIEW_URL") or "").strip()
     display_name = (os.environ.get("DATASOURCE_DISPLAY_NAME") or "Allen & Co EMS").strip()
 
     # Aggregate the custom-property names per enabled object type. Glean rejects a
@@ -71,6 +75,16 @@ def main() -> int:
         for col in e.property_columns:
             if col not in cols:
                 cols.append(col)
+
+    # urlRegex must match every document's viewURL. With a fixed VIEW_URL (a hash-route
+    # SPA), Glean may canonicalize the #fragment away, so anchor the regex on the part
+    # BEFORE the fragment/query and allow anything after it — matches http://ems3/#/home,
+    # http://ems3/, and http://ems3/anything alike. Otherwise use the per-record base.
+    if view_url:
+        prefix = view_url.split("#", 1)[0].split("?", 1)[0].rstrip("/")
+        url_regex = f"{prefix}.*"
+    else:
+        url_regex = f"{view_url_base}/.*"
 
     object_types = sorted(props_by_type)
     object_definitions = [
@@ -89,7 +103,6 @@ def main() -> int:
         )
         for ot in object_types
     ]
-    url_regex = f"{view_url_base}/.*"
 
     print("GLEAN_DATASOURCE :", datasource)
     print("urlRegex         :", url_regex)

@@ -130,3 +130,12 @@ def test_build_view_specs_propagates_exclude_columns():
     body = json.loads(spec.build(df, datasource="ds")[0].body.text_content)
     assert "Secret" not in body
     assert body["CompanyName"] == "Acme"
+
+
+def test_build_view_specs_propagates_fixed_view_url():
+    # VIEW_URL (single fixed landing) flows through the catalog to every document.
+    entry = ViewCatalogEntry(view_name="v_Company", object_type="company", id_column="CompanyID")
+    (spec,) = build_view_specs([entry], default_schema="cnf", view_url="http://ems3/#/home")
+    df = pd.DataFrame([{"CompanyID": 1}, {"CompanyID": 2}])
+    docs = spec.build(df, datasource="ds")
+    assert [d.view_url for d in docs] == ["http://ems3/#/home", "http://ems3/#/home"]
