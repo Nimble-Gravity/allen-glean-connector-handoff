@@ -11,9 +11,11 @@ info:
     Use this action to retrieve actual data rows from the Allen & Co EMS views.
 
     **Use this action when the user asks for specific data:**
-    - "Show me the attendees for company X."
-    - "List the events attendee Y participated in."
-    - "Which companies participated in event Z?"
+    - "Show me the attendees for company X at conference Y."
+    - "List the flights for attendee Z."
+    - "Which companies are registered for event 3?"
+    - Range/date questions: "travel updated between two dates."
+    - Partial-text questions: "companies whose name contains 'Capital'."
 
     **Do NOT use this action when:**
     - The user only wants to know what views exist → use the EMS Schema Explorer
@@ -23,7 +25,15 @@ info:
     - You do not know the exact view name or filter column name.
     - The answer is already in the indexed documents (summaries).
 
-    **Views in scope:** v_Attendee, v_Attendee_Event, v_Company, v_Participation.
+    **Views in scope (rpt schema):** v_EventInstance_Attendee (conference
+    registration: IDs + company), v_Catering_TableAssignment (seating, carries the
+    person's FormalName), v_Activity_Attendee_TimeRange, v_TravelAir (flights),
+    v_TravelGround (ground transport). Common keys across views: AttendeeID,
+    EventInstanceID. Use the Schema Explorer to confirm exact column names.
+
+    **Filtering:** use `filters` (a JSON array) for one or more conditions combined
+    with AND — equality, ranges, dates, IN-lists, and partial-text match. The older
+    `filter_by_column`/`filter_value` pair is a single-equality shortcut.
 
     **Row limit:** defaults to 500 rows; set `limit` to any positive integer for more.
 
@@ -57,31 +67,61 @@ paths:
           required: true
           schema:
             type: string
-            example: "v_Attendee"
+            example: "v_EventInstance_Attendee"
           description: |
             Exact name of the view to query. Letters, digits, and underscores only.
             If unknown, call the Schema Explorer with `show_all_views=true` first.
+
+        - in: query
+          name: filters
+          required: false
+          schema:
+            type: string
+            example: '[{"column":"CompanyName","op":"contains","value":"Capital"},{"column":"EventInstanceID","op":"eq","value":"3"}]'
+          description: |
+            Preferred way to filter. A JSON array of condition objects, combined with
+            AND. Each object is {"column": <name>, "op": <operator>, "value": <value>}.
+            Column names must be letters/digits/underscores (confirm with the Schema
+            Explorer). Every value is passed as a bound SQL parameter — never
+            interpolated.
+
+            Operators (`op`) and the `value` each expects:
+            - eq, ne, gt, gte, lt, lte → a single scalar value.
+              e.g. {"column":"EventInstanceID","op":"eq","value":"3"}
+            - between → a list of exactly two values [low, high] (numbers or dates).
+              e.g. {"column":"UpdatedOn","op":"between","value":["2026-01-01","2026-01-31"]}
+            - in → a non-empty list of values.
+              e.g. {"column":"AttendeeCodeType","op":"in","value":["Institutional","Corporate"]}
+            - is_null, is_not_null → no `value`.
+            - contains, startswith, endswith → a single string; matched
+              case-as-stored with the user's wildcards treated literally.
+              e.g. {"column":"CompanyName","op":"contains","value":"Capital"}
+
+            Dates/datetimes: pass as ISO strings (e.g. "2026-01-31"); the database
+            compares them against the column's real type. Only AND is supported (no
+            OR). Omit `filters` to return all rows (subject to `limit`).
 
         - in: query
           name: filter_by_column
           required: false
           schema:
             type: string
-            example: "CompanyID"
+            example: "EventInstanceID"
           description: |
-            Exact column name to filter by. Letters, digits, and underscores only.
-            Must be provided together with `filter_value`.
+            Single-equality shortcut (legacy). Prefer `filters` for multiple or
+            non-equality conditions. Exact column name; letters, digits, and
+            underscores only. Must be provided together with `filter_value`. Ignored
+            when `filters` is supplied.
 
         - in: query
           name: filter_value
           required: false
           schema:
             type: string
-            example: "12345"
+            example: "3"
           description: |
-            Value to match in the filter column. Exact string equality. Always
-            passed as a bound SQL parameter — never interpolated. Requires
-            `filter_by_column`.
+            Value to match in `filter_by_column` (exact equality). Always passed as a
+            bound SQL parameter — never interpolated. Requires `filter_by_column`.
 
         - in: query
           name: limit
@@ -98,7 +138,7 @@ paths:
           required: false
           schema:
             type: string
-            example: "LastName"
+            example: "CompanyName"
           description: |
             Column to sort by. Letters, digits, and underscores only. If omitted,
             a stable but unspecified order is used.
@@ -118,7 +158,7 @@ paths:
           required: false
           schema:
             type: string
-            example: "AttendeeID,FirstName,LastName"
+            example: "AttendeeID,CompanyName,AttendeeCode"
           description: |
             Comma-separated columns to include. Each must be letters/digits/underscores.
             If omitted, all columns are returned. Ignored when distinct_column is set.
@@ -146,9 +186,9 @@ paths:
                   value:
                     data:
                       - AttendeeID: 101
-                        FirstName: "Ada"
-                        LastName: "Lovelace"
-                        CompanyID: 12345
+                        EventInstanceID: 3
+                        CompanyName: "Maverick Capital, Ltd."
+                        AttendeeCode: "Institutional"
                     row_count: 1
                 empty_result:
                   value:
@@ -210,8 +250,8 @@ components:
             Types reflect the SQL column type; datetimes are ISO 8601 strings.
           example:
             - AttendeeID: 101
-              FirstName: "Ada"
-              LastName: "Lovelace"
+              EventInstanceID: 3
+              CompanyName: "Maverick Capital, Ltd."
         row_count:
           type: integer
           description: "Number of rows returned. If equal to `limit`, more may exist."

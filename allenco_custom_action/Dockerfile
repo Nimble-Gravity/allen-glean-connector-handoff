@@ -7,6 +7,9 @@
 FROM python:3.12-slim
 
 # Install Microsoft ODBC Driver 18 for SQL Server (required by pyodbc).
+# libgssapi-krb5-2 is a RUNTIME dependency of the driver .so (Kerberos/GSSAPI) that
+# --no-install-recommends does not pull; without it pyodbc fails at connect with
+# "Can't open lib ... libmsodbcsql-18.*.so ... file not found". Install it explicitly.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl gnupg \
     && curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
@@ -15,7 +18,7 @@ RUN apt-get update \
         https://packages.microsoft.com/debian/12/prod bookworm main" \
         > /etc/apt/sources.list.d/mssql-release.list \
     && apt-get update \
-    && ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 \
+    && ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 libgssapi-krb5-2 \
     && apt-get purge -y --auto-remove curl gnupg \
     && rm -rf /var/lib/apt/lists/*
 

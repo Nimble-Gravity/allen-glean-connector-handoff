@@ -88,6 +88,18 @@ def load_view_permissions_cache(
     return cache
 
 
+def load_view_permissions_all_access() -> bool:
+    """Whether every authenticated user may access every view (all-access mode).
+
+    Allen & Co runs all-access: the per-view SQL permissions gate is not used and
+    ``check_user_has_view_access`` always passes (``user_email`` is still logged for
+    audit). Enable with ``VIEW_PERMISSIONS_ALL_ACCESS=true``; default off preserves
+    deny-by-default, so the gate can be re-enabled later without a code change.
+    """
+    raw = (os.environ.get("VIEW_PERMISSIONS_ALL_ACCESS") or "").strip().lower()
+    return raw in ("1", "true", "yes")
+
+
 def load_superuser_emails() -> frozenset[str]:
     """Parse GLEAN_INDEXING_SUPERUSER_ALLOWED_USERS into a frozenset of lowercase emails."""
     raw = (os.environ.get("GLEAN_INDEXING_SUPERUSER_ALLOWED_USERS") or "").strip()
@@ -117,15 +129,25 @@ def check_user_has_view_access(
     view_name: str,
     cache: dict[str, list[str]],
     superuser_emails: frozenset[str],
+    all_access: bool = False,
 ) -> bool:
     """Return True if user_email is permitted to access view_name.
 
-    Fast path: superusers always pass. Otherwise the user must appear in the
-    view's allow-list from ``cache``. Returns False when the view is absent from
-    the cache (deny-by-default) — which, with the current empty stub cache, means
-    every non-superuser is denied until AD/Entra is wired.
+    All-access short-circuit: when ``all_access`` is set every user passes (Allen &
+    Co's decided posture). Otherwise: superusers always pass; else the user must
+    appear in the view's allow-list from ``cache``. Returns False when the view is
+    absent from the cache (deny-by-default) — which, with an empty cache, means
+    every non-superuser is denied until the SQL permissions view is configured.
     """
     normalized = user_email.strip().lower()
+
+    if all_access:
+        logger.debug(
+            "check_user_has_view_access: all-access mode — GRANTED '%s' for '%s'.",
+            normalized,
+            view_name,
+        )
+        return True
 
     if normalized in superuser_emails:
         logger.debug(

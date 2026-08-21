@@ -5,6 +5,7 @@ import logging
 import pyodbc
 from db import get_connection
 from dependencies import (
+    get_all_access,
     get_db_settings,
     get_notifier,
     get_superuser_emails,
@@ -30,6 +31,7 @@ def get_metadata(
     notifier: Notifier = Depends(get_notifier),
     view_perm_cache: dict[str, str] = Depends(get_view_perm_cache),
     superuser_emails: frozenset[str] = Depends(get_superuser_emails),
+    all_access: bool = Depends(get_all_access),
 ) -> MetadataResponse:
     if show_all_views and show_view_columns is not None:
         raise HTTPException(
@@ -63,23 +65,28 @@ def get_metadata(
 
     try:
         if show_view_columns is not None and not check_user_has_view_access(
-            user_email, show_view_columns, view_perm_cache, superuser_emails
+            user_email, show_view_columns, view_perm_cache, superuser_emails, all_access
         ):
             raise HTTPException(status_code=403, detail=PERMISSION_DENIED_MESSAGE)
 
         cursor = conn.cursor()
 
         if show_all_views:
-            cursor.execute("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.VIEWS ORDER BY TABLE_NAME")
+            cursor.execute(
+                "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.VIEWS "
+                "WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME",
+                settings.schema,
+            )
             views = [row[0] for row in cursor.fetchall()]
             return MetadataResponse(user_email=user_email, views=views)
 
         cursor.execute(
             "SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE "
             "FROM INFORMATION_SCHEMA.COLUMNS "
-            "WHERE TABLE_NAME = ? "
+            "WHERE TABLE_NAME = ? AND TABLE_SCHEMA = ? "
             "ORDER BY ORDINAL_POSITION",
             show_view_columns,
+            settings.schema,
         )
         rows = cursor.fetchall()
         if not rows:

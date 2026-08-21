@@ -14,7 +14,7 @@ production database credentials ever leave your environment.
 | `indexer` | Batch job that indexes the EMS views into Glean | Container Apps **Job** (scheduled) |
 | `custom-action` | Always-on API for Glean's live queries | Container **App** (HTTPS) |
 
-Four steps: **1) build → 2) provision → 3) deploy → 4) verify.**
+Five steps: **1) build → 2) provision → 3) deploy → 4) verify → 5) register in Glean.**
 
 ---
 
@@ -60,7 +60,7 @@ ACR=<your-acr-name> ./infra/allenco/build-images.sh --local   # or local Docker
   | **AcrPull** | the ACR | pull the image at runtime (or the app can't start) |
   | **Key Vault Secrets User** | the Key Vault | read the secrets |
   | **Storage Blob Data Contributor** | the storage account | persist sync state |
-  | **`SELECT`** on the 4 views | the database | run `infra/sql/mi_user.sql` as the Entra admin |
+  | **`SELECT`** on the in-scope `rpt` views (5) | the database | run `infra/sql/mi_user.sql` as the Entra admin |
 - **NSG rule**: container subnet → MI :1433 (MI public endpoint stays disabled).
 
 Then fill **`infra/allenco/main.bicepparam`** with those resource IDs **and the identity's
@@ -113,6 +113,47 @@ az role assignment list --assignee-object-id "$PRINCIPAL_ID" \
 **API health** (unauthenticated probe): `curl https://<api-fqdn>/health` → `{"status":"ok"}`.
 
 Adding a view later = `GRANT SELECT` on it → rebuild (Step 1) → re-deploy (Step 3). No downtime.
+
+---
+
+## Step 5 — Register the Custom Action in Glean
+
+The `custom-action` app answers Glean's **live queries**. It ships three OpenAPI specs.
+These can be registered by your Glean admin — or, if you grant **Nimble Gravity** access to
+Glean, we'll register and test them for you. Either way, registration needs the API URL
+(printed by Step 3) and the three specs:
+
+| Spec (`allenco_custom_action/openapi/…`) | Glean action | Notes |
+|---|---|---|
+| `metadata.yaml` | Schema explorer (list views / columns) | — |
+| `query.yaml` | Row queries | supports rich `filters` (see below) |
+| `aggregate.yaml` | count/sum/avg/min/max, grouped | supports the same `filters` |
+
+For **each** spec, before importing into Glean:
+1. Replace `servers[0].url` (`https://SERVER_HOST`) with the deployed API **FQDN**.
+2. Configure **bearer auth** with the value of the `custom-action-api-key` secret.
+
+Then, on the Container App **ingress**, restrict inbound to **Glean's published egress IP
+ranges** (ask your Glean admin for the list) — only Glean should reach the API. `/health`
+stays open for the platform probes.
+
+### Custom Action app settings (env)
+
+Set on the `custom-action` Container App (alongside the DB/auth vars from Step 2):
+
+| Setting | Value | Why |
+|---|---|---|
+| `DB_SCHEMA` | `rpt` | The EMS views live in the **`rpt`** schema; the API qualifies every view as `[rpt].[view]` and lists only that schema. Must match where the MI has `SELECT`. |
+| `VIEW_PERMISSIONS_ALL_ACCESS` | `true` | All-access posture (Allen & Co decision): every Glean user may query every in-scope view; `user_email` is still logged for audit. Leave unset/`false` to fall back to per-view SQL grants. |
+| `CUSTOM_ACTION_API_KEY` | *(from Key Vault)* | The bearer key Glean presents on every call. |
+| `MAX_ROWS` | `500` (optional) | Upper bound on rows per `/query`. |
+
+**What the agent can ask for.** `query`/`aggregate` accept a `filters` parameter — a JSON
+array of `{column, op, value}` combined with **AND**: equality (`eq`/`ne`), ranges
+(`between`, `gt`/`gte`/`lt`/`lte`), `in`-lists, null checks (`is_null`/`is_not_null`), and
+partial text (`contains`/`startswith`/`endswith`). Every value is a **bound** SQL parameter
+and the API is **read-only** (SELECT) — see the `description` prose in each spec, which
+doubles as the agent's usage prompt.
 
 ---
 

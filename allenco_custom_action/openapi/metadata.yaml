@@ -20,7 +20,9 @@ info:
     - The user wants actual data rows from a view — use the EMS Query action instead.
     - You already know the exact view name and its columns.
 
-    **Views in scope:** v_Attendee, v_Attendee_Event, v_Company, v_Participation.
+    **Views in scope (rpt schema):** v_EventInstance_Attendee, v_Catering_TableAssignment,
+    v_Activity_Attendee_TimeRange, v_TravelAir, v_TravelGround. `show_all_views`
+    lists exactly the views the connector exposes.
 
     **Important:** Each request does ONE operation: list all views OR list columns
     for a view. Never both in the same request.
@@ -66,7 +68,7 @@ paths:
           required: false
           schema:
             type: string
-            example: "v_Attendee"
+            example: "v_EventInstance_Attendee"
           description: |
             Exact name of the view whose columns you want to inspect. Letters,
             digits, and underscores only. Cannot be combined with `show_all_views`.
@@ -84,22 +86,23 @@ paths:
                   value:
                     user_email: "jane.doe@allenandco.com"
                     views:
-                      - "v_Attendee"
-                      - "v_Attendee_Event"
-                      - "v_Company"
-                      - "v_Participation"
+                      - "v_Activity_Attendee_TimeRange"
+                      - "v_Catering_TableAssignment"
+                      - "v_EventInstance_Attendee"
+                      - "v_TravelAir"
+                      - "v_TravelGround"
                 columns_response:
                   summary: "Response when show_view_columns is set"
                   value:
                     user_email: "jane.doe@allenandco.com"
-                    view: "v_Company"
+                    view: "v_EventInstance_Attendee"
                     columns:
-                      - column_name: "CompanyID"
+                      - column_name: "AttendeeID"
                         data_type: "int"
                         is_nullable: "NO"
                       - column_name: "CompanyName"
-                        data_type: "varchar"
-                        is_nullable: "NO"
+                        data_type: "nvarchar"
+                        is_nullable: "YES"
         '400':
           description: |
             Bad request. Causes: both parameters provided; neither provided; or

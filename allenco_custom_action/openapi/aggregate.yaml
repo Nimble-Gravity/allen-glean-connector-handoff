@@ -13,8 +13,8 @@ info:
 
     **Use this action when the user asks for:**
     - Totals, counts, averages, or extremes: "How many attendees per company?",
-      "How many events did attendee X participate in?"
-    - Breakdowns by category: "Count participations grouped by company."
+      "How many flights for attendee X?"
+    - Breakdowns by category: "Count registrations grouped by company."
     - Any question that needs a number derived from many rows — not the rows themselves.
 
     **Do NOT use this action when:**
@@ -25,8 +25,13 @@ info:
     **Key rules:**
     - `agg_column` is required for `sum`, `avg`, `min`, `max`; NOT needed for `count`.
     - Omit `group_by_column` for a single total row; provide it for one row per value.
+    - Use `filters` (a JSON array) to scope the rows before aggregating — equality,
+      ranges, dates, IN-lists, or partial text, combined with AND. The older
+      `filter_by_column`/`filter_value` pair is a single-equality shortcut.
 
-    **Views in scope:** v_Attendee, v_Attendee_Event, v_Company, v_Participation.
+    **Views in scope (rpt schema):** v_EventInstance_Attendee, v_Catering_TableAssignment,
+    v_Activity_Attendee_TimeRange, v_TravelAir, v_TravelGround. Common keys:
+    AttendeeID, EventInstanceID. Confirm column names with the Schema Explorer.
 
 servers:
   - url: "https://SERVER_HOST"
@@ -57,7 +62,7 @@ paths:
           required: true
           schema:
             type: string
-            example: "v_Participation"
+            example: "v_EventInstance_Attendee"
           description: |
             Exact name of the view to aggregate. Letters, digits, and underscores only.
 
@@ -87,25 +92,45 @@ paths:
           required: false
           schema:
             type: string
-            example: "CompanyID"
+            example: "CompanyName"
           description: |
             Column to group by (one row per distinct value). Omit for a single total.
             Letters, digits, and underscores only.
+
+        - in: query
+          name: filters
+          required: false
+          schema:
+            type: string
+            example: '[{"column":"EventInstanceID","op":"eq","value":"3"}]'
+          description: |
+            Preferred way to scope the rows before aggregating. A JSON array of
+            condition objects combined with AND, identical in shape to the Query
+            action's `filters`. Each object is {"column", "op", "value"}; every value
+            is bound as a SQL parameter.
+
+            Operators: eq/ne/gt/gte/lt/lte (scalar value), between (two-element list
+            [low, high]), in (non-empty list), is_null/is_not_null (no value),
+            contains/startswith/endswith (string). Dates as ISO strings. AND only.
+            e.g. count travel rows updated in January:
+            [{"column":"UpdatedOn","op":"between","value":["2026-01-01","2026-01-31"]}]
 
         - in: query
           name: filter_by_column
           required: false
           schema:
             type: string
-            example: "EventID"
-          description: "Column to filter by before aggregating. Requires filter_value."
+            example: "EventInstanceID"
+          description: |
+            Single-equality shortcut (legacy). Prefer `filters`. Column to filter by
+            before aggregating; requires filter_value. Ignored when `filters` is set.
 
         - in: query
           name: filter_value
           required: false
           schema:
             type: string
-            example: "42"
+            example: "3"
           description: |
             Value to match (exact equality). Always passed as a bound SQL parameter.
             Requires filter_by_column.
@@ -122,9 +147,9 @@ paths:
                   summary: "Count participations by company"
                   value:
                     data:
-                      - CompanyID: 12345
+                      - CompanyName: "Maverick Capital, Ltd."
                         count: 18
-                      - CompanyID: 67890
+                      - CompanyName: "Viking Global Investors"
                         count: 5
                     row_count: 2
                 single_total:
@@ -189,7 +214,7 @@ components:
             metric (e.g. {"CompanyID": 12345, "count": 18}). Without it: a single row
             with only the metric. The metric key matches `aggregation`.
           example:
-            - CompanyID: 12345
+            - CompanyName: "Maverick Capital, Ltd."
               count: 18
         row_count:
           type: integer

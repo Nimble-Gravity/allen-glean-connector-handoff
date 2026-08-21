@@ -204,6 +204,126 @@ def test_query_effective_limit_respects_smaller_request(monkeypatch, recorder, f
     assert 5 in select_calls[0][1][0]
 
 
+# --- filters (multi-condition WHERE) + schema qualification ---
+
+
+def _select_call(cur):
+    """Return (sql, bound_params_list) for the main SELECT (not the view-exists check)."""
+    calls = [e for e in cur.executed if "SELECT TOP" in e[0] or "SELECT DISTINCT" in e[0]]
+    assert calls, f"no SELECT executed; got {[e[0] for e in cur.executed]}"
+    sql, params = calls[0]
+    return sql, list(params[0])  # params[0] is the tuple passed to cursor.execute
+
+
+def _run_query(monkeypatch, recorder, fake_cursor_factory, extra_params):
+    cur = _make_fake_conn(
+        monkeypatch, fake_cursor_factory, rows=[], description=[("x",)], fetchone_seq=[[1]]
+    )
+    params = {"user_email": "a@sdh.com", "view_name": "vwTest"}
+    params.update(extra_params)
+    with _client() as client:
+        resp = client.get("/query", params=params, headers=_auth())
+    return resp, cur
+
+
+def test_query_qualifies_schema_in_from_and_exists_check(
+    monkeypatch, recorder, fake_cursor_factory
+):
+    resp, cur = _run_query(monkeypatch, recorder, fake_cursor_factory, {})
+    assert resp.status_code == 200
+    sql, _ = _select_call(cur)
+    assert "FROM [dbo].[vwTest]" in sql  # DB_SCHEMA defaults to dbo in tests
+    exists = [e for e in cur.executed if "INFORMATION_SCHEMA.VIEWS" in e[0]][0]
+    assert "TABLE_SCHEMA = ?" in exists[0]
+    assert "dbo" in exists[1]
+
+
+def test_query_multi_filter_and(monkeypatch, recorder, fake_cursor_factory):
+    filters = (
+        '[{"column":"CompanyName","op":"eq","value":"Acme"},'
+        '{"column":"EventInstanceID","op":"gte","value":"3"}]'
+    )
+    resp, cur = _run_query(monkeypatch, recorder, fake_cursor_factory, {"filters": filters})
+    assert resp.status_code == 200
+    sql, bound = _select_call(cur)
+    assert "WHERE [CompanyName] = ? AND [EventInstanceID] >= ?" in sql
+    assert bound[1:] == ["Acme", "3"]  # bound[0] is the TOP limit
+
+
+def test_query_between_filter(monkeypatch, recorder, fake_cursor_factory):
+    filters = '[{"column":"UpdatedOn","op":"between","value":["2026-01-01","2026-01-31"]}]'
+    resp, cur = _run_query(monkeypatch, recorder, fake_cursor_factory, {"filters": filters})
+    assert resp.status_code == 200
+    sql, bound = _select_call(cur)
+    assert "[UpdatedOn] BETWEEN ? AND ?" in sql
+    assert bound[1:] == ["2026-01-01", "2026-01-31"]
+
+
+def test_query_in_filter(monkeypatch, recorder, fake_cursor_factory):
+    filters = '[{"column":"AttendeeCodeType","op":"in","value":["Institutional","Corporate"]}]'
+    resp, cur = _run_query(monkeypatch, recorder, fake_cursor_factory, {"filters": filters})
+    assert resp.status_code == 200
+    sql, bound = _select_call(cur)
+    assert "[AttendeeCodeType] IN (?, ?)" in sql
+    assert bound[1:] == ["Institutional", "Corporate"]
+
+
+def test_query_contains_filter_escapes_wildcards(monkeypatch, recorder, fake_cursor_factory):
+    filters = '[{"column":"CompanyName","op":"contains","value":"50%"}]'
+    resp, cur = _run_query(monkeypatch, recorder, fake_cursor_factory, {"filters": filters})
+    assert resp.status_code == 200
+    sql, bound = _select_call(cur)
+    assert "LIKE ? ESCAPE" in sql
+    assert bound[-1] == "%50\\%%"  # user's % escaped, wrapped in code's own %
+
+
+def test_query_distinct_with_filters(monkeypatch, recorder, fake_cursor_factory):
+    filters = '[{"column":"region","op":"eq","value":"West"}]'
+    resp, cur = _run_query(
+        monkeypatch,
+        recorder,
+        fake_cursor_factory,
+        {"distinct_column": "division", "filters": filters},
+    )
+    assert resp.status_code == 200
+    sql, bound = _select_call(cur)
+    assert "SELECT DISTINCT" in sql
+    assert "AND [region] = ?" in sql
+    assert bound[-1] == "West"
+
+
+def test_query_legacy_filter_still_works(monkeypatch, recorder, fake_cursor_factory):
+    resp, cur = _run_query(
+        monkeypatch,
+        recorder,
+        fake_cursor_factory,
+        {"filter_by_column": "name", "filter_value": "Alice"},
+    )
+    assert resp.status_code == 200
+    sql, bound = _select_call(cur)
+    assert "WHERE [name] = ?" in sql
+    assert bound[-1] == "Alice"
+
+
+def test_query_all_access_allows_non_superuser(monkeypatch, recorder, fake_cursor_factory):
+    monkeypatch.setenv("VIEW_PERMISSIONS_ALL_ACCESS", "true")
+    _make_fake_conn(
+        monkeypatch,
+        fake_cursor_factory,
+        rows=[("Alice",)],
+        description=[("name",)],
+        fetchone_seq=[[1]],
+    )
+    with _client() as client:
+        resp = client.get(
+            "/query",
+            params={"user_email": "nobody@allen.com", "view_name": "vwTest"},
+            headers=_auth(),
+        )
+    # nobody@allen.com is not a superuser; only all-access lets this through.
+    assert resp.status_code == 200
+
+
 # --- 400 validation errors ---
 
 
@@ -223,6 +343,32 @@ def test_query_effective_limit_respects_smaller_request(monkeypatch, recorder, f
         ({"user_email": "a@sdh.com", "view_name": "vwTest", "select_columns": "  "}, 400),
         (
             {"user_email": "a@sdh.com", "view_name": "vwTest", "select_columns": "valid,bad col!"},
+            400,
+        ),
+        # filters: malformed JSON, unknown op, unsafe column, bad between arity
+        ({"user_email": "a@sdh.com", "view_name": "vwTest", "filters": "not json"}, 400),
+        (
+            {
+                "user_email": "a@sdh.com",
+                "view_name": "vwTest",
+                "filters": '[{"column":"a","op":"nope","value":1}]',
+            },
+            400,
+        ),
+        (
+            {
+                "user_email": "a@sdh.com",
+                "view_name": "vwTest",
+                "filters": '[{"column":"bad col","op":"eq","value":1}]',
+            },
+            400,
+        ),
+        (
+            {
+                "user_email": "a@sdh.com",
+                "view_name": "vwTest",
+                "filters": '[{"column":"a","op":"between","value":[1]}]',
+            },
             400,
         ),
     ],

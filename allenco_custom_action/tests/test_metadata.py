@@ -58,6 +58,22 @@ def test_metadata_show_all_views(monkeypatch, recorder, fake_cursor_factory):
     assert body["views"] == ["vwAlpha", "vwBeta"]
 
 
+def test_metadata_show_all_views_filters_by_schema(monkeypatch, recorder, fake_cursor_factory):
+    cur = _make_fake_conn(
+        monkeypatch, fake_cursor_factory, rows=[("vwAlpha",)], description=[("TABLE_NAME",)]
+    )
+    with _client() as client:
+        resp = client.get(
+            "/metadata",
+            params={"user_email": "a@sdh.com", "show_all_views": "true"},
+            headers=_auth(),
+        )
+    assert resp.status_code == 200
+    sql, params = cur.executed[0]
+    assert "TABLE_SCHEMA = ?" in sql  # only the configured schema (dbo in tests)
+    assert "dbo" in params
+
+
 def test_metadata_show_view_columns(monkeypatch, recorder, fake_cursor_factory):
     rows = [
         ("LotID", "int", "NO"),

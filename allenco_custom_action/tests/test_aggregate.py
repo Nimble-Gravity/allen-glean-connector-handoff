@@ -190,6 +190,69 @@ def test_aggregate_with_filter(monkeypatch, recorder, fake_cursor_factory):
     assert any("WHERE [Division] = ?" in sql for sql in sql_executed)
 
 
+def _agg_call(cur):
+    """Return (sql, bound_params_list) for the aggregation SELECT (not the exists check)."""
+    calls = [e for e in cur.executed if "FROM [dbo].[vwTest]" in e[0]]
+    assert calls, f"no aggregation SELECT executed; got {[e[0] for e in cur.executed]}"
+    sql, params = calls[0]
+    return sql, list(params[0]) if params else []
+
+
+def test_aggregate_multi_filter_and(monkeypatch, recorder, fake_cursor_factory):
+    cur = _make_fake_conn(
+        monkeypatch,
+        fake_cursor_factory,
+        rows=[(2,)],
+        description=[("count",)],
+        fetchone_seq=[[1]],
+    )
+    filters = (
+        '[{"column":"CompanyName","op":"eq","value":"Acme"},'
+        '{"column":"EventInstanceID","op":"eq","value":"3"}]'
+    )
+    with _client() as client:
+        resp = client.get(
+            "/aggregate",
+            params={
+                "user_email": "a@sdh.com",
+                "view_name": "vwTest",
+                "aggregation": "count",
+                "filters": filters,
+            },
+            headers=_auth(),
+        )
+    assert resp.status_code == 200
+    sql, bound = _agg_call(cur)
+    assert "WHERE [CompanyName] = ? AND [EventInstanceID] = ?" in sql
+    assert bound == ["Acme", "3"]
+
+
+def test_aggregate_between_filter(monkeypatch, recorder, fake_cursor_factory):
+    cur = _make_fake_conn(
+        monkeypatch,
+        fake_cursor_factory,
+        rows=[(7,)],
+        description=[("count",)],
+        fetchone_seq=[[1]],
+    )
+    filters = '[{"column":"UpdatedOn","op":"between","value":["2026-01-01","2026-01-31"]}]'
+    with _client() as client:
+        resp = client.get(
+            "/aggregate",
+            params={
+                "user_email": "a@sdh.com",
+                "view_name": "vwTest",
+                "aggregation": "count",
+                "filters": filters,
+            },
+            headers=_auth(),
+        )
+    assert resp.status_code == 200
+    sql, bound = _agg_call(cur)
+    assert "[UpdatedOn] BETWEEN ? AND ?" in sql
+    assert bound == ["2026-01-01", "2026-01-31"]
+
+
 # --- 400 validation errors ---
 
 
@@ -229,6 +292,26 @@ def test_aggregate_with_filter(monkeypatch, recorder, fake_cursor_factory):
                 "view_name": "vwTest",
                 "aggregation": "count",
                 "filter_by_column": "col!",
+            },
+            400,
+        ),
+        # Malformed filters JSON
+        (
+            {
+                "user_email": "a@sdh.com",
+                "view_name": "vwTest",
+                "aggregation": "count",
+                "filters": "not json",
+            },
+            400,
+        ),
+        # Unknown filter op
+        (
+            {
+                "user_email": "a@sdh.com",
+                "view_name": "vwTest",
+                "aggregation": "count",
+                "filters": '[{"column":"a","op":"nope","value":1}]',
             },
             400,
         ),

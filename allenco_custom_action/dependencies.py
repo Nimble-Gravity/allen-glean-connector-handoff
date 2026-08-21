@@ -28,6 +28,11 @@ def get_superuser_emails(request: Request) -> frozenset[str]:
     return request.app.state.superuser_emails
 
 
+def get_all_access(request: Request) -> bool:
+    """Whether all-access mode is on (every user may query every view)."""
+    return request.app.state.view_perm_all_access
+
+
 # Unauthenticated paths (health/liveness probes) — the platform, not Glean, calls
 # these, so they must not require the bearer key.
 _PUBLIC_PATHS = frozenset({"/health"})

@@ -5,6 +5,7 @@ import logging
 import pyodbc
 from db import get_connection
 from dependencies import (
+    get_all_access,
     get_db_settings,
     get_notifier,
     get_superuser_emails,
@@ -15,7 +16,7 @@ from notifications_setup import Notifier, notify_db_error
 from permissions import PERMISSION_DENIED_MESSAGE, check_user_has_view_access
 from schemas import QueryResponse
 from settings import DbSettings
-from validators import SAFE_IDENTIFIER, _coerce
+from validators import SAFE_IDENTIFIER, Filter, _coerce, build_where, parse_filters
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["query"])
@@ -27,6 +28,7 @@ def get_query(
     view_name: str,
     filter_by_column: str | None = None,
     filter_value: str | None = None,
+    filters: str | None = None,
     limit: int = 500,
     sort_by_column: str | None = None,
     sort_order: str | None = None,
@@ -36,6 +38,7 @@ def get_query(
     notifier: Notifier = Depends(get_notifier),
     view_perm_cache: dict[str, str] = Depends(get_view_perm_cache),
     superuser_emails: frozenset[str] = Depends(get_superuser_emails),
+    all_access: bool = Depends(get_all_access),
 ) -> QueryResponse:
 
     if not SAFE_IDENTIFIER.match(view_name):
@@ -68,6 +71,15 @@ def get_query(
     if limit < 1:
         raise HTTPException(status_code=400, detail="limit must be at least 1.")
 
+    # Multi-condition filters (AND). The legacy single-equality pair is folded into
+    # the same list so there is one WHERE builder path.
+    try:
+        parsed_filters = parse_filters(filters)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not parsed_filters and filter_by_column is not None and filter_value is not None:
+        parsed_filters = [Filter(column=filter_by_column, op="eq", value=filter_value)]
+
     parsed_columns: list[str] = []
     if select_columns is not None:
         parsed_columns = [c.strip() for c in select_columns.split(",") if c.strip()]
@@ -92,14 +104,18 @@ def get_query(
         ) from exc
 
     try:
-        if not check_user_has_view_access(user_email, view_name, view_perm_cache, superuser_emails):
+        if not check_user_has_view_access(
+            user_email, view_name, view_perm_cache, superuser_emails, all_access
+        ):
             raise HTTPException(status_code=403, detail=PERMISSION_DENIED_MESSAGE)
 
         cursor = conn.cursor()
 
         cursor.execute(
-            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.VIEWS WHERE TABLE_NAME = ?",
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.VIEWS "
+            "WHERE TABLE_NAME = ? AND TABLE_SCHEMA = ?",
             view_name,
+            settings.schema,
         )
         if cursor.fetchone()[0] == 0:
             raise HTTPException(status_code=404, detail=f"View '{view_name}' not found.")
@@ -107,21 +123,21 @@ def get_query(
         if distinct_column is not None:
             parts = [
                 f"SELECT DISTINCT TOP (?) [{distinct_column}]",
-                f"FROM [{view_name}]",
+                f"FROM [{settings.schema}].[{view_name}]",
                 f"WHERE [{distinct_column}] IS NOT NULL",
             ]
             params: list = [effective_limit]
-            if filter_by_column is not None and filter_value is not None:
-                parts.append(f"AND [{filter_by_column}] = ?")
-                params.append(filter_value)
+            predicates = build_where(parsed_filters, params)
+            if predicates:
+                parts.append("AND " + " AND ".join(predicates))
             parts.append(f"ORDER BY [{distinct_column}]")
         else:
             col_clause = ", ".join(f"[{c}]" for c in parsed_columns) if parsed_columns else "*"
-            parts = [f"SELECT TOP (?) {col_clause} FROM [{view_name}]"]
+            parts = [f"SELECT TOP (?) {col_clause} FROM [{settings.schema}].[{view_name}]"]
             params = [effective_limit]
-            if filter_by_column is not None and filter_value is not None:
-                parts.append(f"WHERE [{filter_by_column}] = ?")
-                params.append(filter_value)
+            predicates = build_where(parsed_filters, params)
+            if predicates:
+                parts.append("WHERE " + " AND ".join(predicates))
             if sort_by_column is not None:
                 order = (sort_order or "ASC").upper()
                 parts.append(f"ORDER BY [{sort_by_column}] {order}")
