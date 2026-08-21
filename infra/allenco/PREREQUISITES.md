@@ -16,14 +16,14 @@ Two modes; pick one:
 | Azure CLI (`az login` to your tenant) | 2.50+ | 2.50+ |
 | ACR permission | **AcrPush** (or Contributor) | **AcrPush** |
 | Source repository | ✅ | ✅ |
-| Outbound HTTPS 443 (this machine) | `*.azurecr.io` + Azure control plane (`login.microsoftonline.com`, `management.azure.com`) | the above **+** `mcr.microsoft.com` + `packages.microsoft.com` |
+| Outbound HTTPS 443 (this machine) | `*.azurecr.io` + Azure control plane (`login.microsoftonline.com`, `management.azure.com`) | the above **+** `mcr.microsoft.com` + `packages.microsoft.com` + `deb.debian.org`/`security.debian.org` (base-image apt deps) |
 | Disk | minimal | ~2–3 GB |
 
 In **`az acr build`** mode the base image (`mcr.microsoft.com`) and ODBC Driver 18
 (`packages.microsoft.com`) are pulled by the **ACR build agent** (server-side) — the
 machine running the script only needs the ACR endpoint + Azure control plane. A
 locked-down build box can still use `az acr build`. Only **`--local`** needs your
-machine to reach `mcr`/`packages`.
+machine to reach `mcr`/`packages`/the Debian mirrors (`deb.debian.org`).
 
 **Target platform:** the deployed images must be **`linux/amd64`** (Azure Container
 Apps). `az acr build` produces amd64 by default; `--local` pins `--platform
@@ -62,11 +62,11 @@ Connection-string shapes:
 
 ```
 # Production — user-assigned managed identity (passwordless)
-DRIVER={ODBC Driver 18 for SQL Server};SERVER=<mi-fqdn>,1433;DATABASE=ems;
+DRIVER={ODBC Driver 18 for SQL Server};SERVER=<mi-fqdn>,1433;DATABASE=<ems-database>;
 Encrypt=yes;TrustServerCertificate=no;Authentication=ActiveDirectoryMsi;UID=<identity-client-id>;
 
 # Dev — SQL login (Bastion / initial validation)
-DRIVER={ODBC Driver 18 for SQL Server};SERVER=<mi-fqdn>,1433;DATABASE=ems;
+DRIVER={ODBC Driver 18 for SQL Server};SERVER=<mi-fqdn>,1433;DATABASE=<ems-database>;
 Encrypt=yes;TrustServerCertificate=no;UID=glean_dev;PWD=<secret>;
 ```
 
