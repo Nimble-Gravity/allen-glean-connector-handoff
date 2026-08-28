@@ -157,6 +157,15 @@ doubles as the agent's usage prompt.
 
 ---
 
+## Operate — scheduled indexing
+
+The `indexer` runs on a schedule. The default is the **Container Apps Job** (Step 3; cron in
+`main.bicepparam`). Alternatively, run it **on the VM** with Windows Task Scheduler — see
+[`SCHEDULED-INDEXING.md`](./SCHEDULED-INDEXING.md). Pick one path; don't run both against the
+same datasource.
+
+---
+
 ## Delivery model (recap)
 
 Allen & Co builds, owns, and operates everything; Nimble Gravity provides source + tooling and
