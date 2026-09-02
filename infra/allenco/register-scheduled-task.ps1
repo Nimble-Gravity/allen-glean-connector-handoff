@@ -56,11 +56,21 @@ $Common = @{
   Force       = $true
 }
 
+# Registering a task (especially -Principal SYSTEM) needs an elevated shell.
+# Fail fast with a clear message instead of the confusing raw CimException.
+$CurrentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+$IsElevated = (New-Object Security.Principal.WindowsPrincipal($CurrentIdentity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $IsElevated) {
+  throw 'This script must run in an elevated PowerShell (Run as Administrator) to register a scheduled task.'
+}
+
 # Principal / Run As. msi decouples the DB identity from this account (see header),
 # so a low-privilege service account or SYSTEM is fine.
+# Register-ScheduledTask can raise its failure as a non-terminating CIM error even
+# under $ErrorActionPreference='Stop', so force it to stop here explicitly.
 if ($AsSystem) {
   $Principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-  Register-ScheduledTask @Common -Principal $Principal | Out-Null
+  Register-ScheduledTask @Common -Principal $Principal -ErrorAction Stop | Out-Null
 }
 elseif ($RunAsUser) {
   # -User/-Password on Register-ScheduledTask stores the password and sets logon
@@ -69,7 +79,7 @@ elseif ($RunAsUser) {
   $Bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($Secure)
   try { $Plain = [Runtime.InteropServices.Marshal]::PtrToStringAuto($Bstr) }
   finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($Bstr) }
-  Register-ScheduledTask @Common -User $RunAsUser -Password $Plain -RunLevel Limited | Out-Null
+  Register-ScheduledTask @Common -User $RunAsUser -Password $Plain -RunLevel Limited -ErrorAction Stop | Out-Null
 }
 else {
   throw 'Specify -AsSystem or -RunAsUser <DOMAIN\account>. With msi the account only needs local rights to the repo + .venv (the DB identity comes from the VM managed identity).'
