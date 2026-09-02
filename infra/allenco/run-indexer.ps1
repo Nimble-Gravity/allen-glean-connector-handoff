@@ -24,7 +24,7 @@ $ErrorActionPreference = 'Stop'
 # off so we always reach the summary + `exit $exit` below (no-op on Windows PS 5.1).
 $PSNativeCommandUseErrorActionPreference = $false
 
-$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..' '..')).Path
+$RepoRoot = (Resolve-Path (Join-Path (Join-Path $PSScriptRoot '..') '..')).Path
 $Python   = Join-Path $RepoRoot '.venv\Scripts\python.exe'
 if (-not (Test-Path $Python)) {
   throw ("Python venv not found at $Python. Create it first (see infra/allenco/DEV-ENVIRONMENT.md): " +

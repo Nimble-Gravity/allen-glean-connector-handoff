@@ -14,7 +14,7 @@ $RG = $env:RG; if (-not $RG) { throw 'Set $env:RG to Allen & Co''s resource grou
 $IndexerTag = if ($env:INDEXER_TAG) { $env:INDEXER_TAG } else { 'indexer:latest' }
 $ApiTag     = if ($env:API_TAG)     { $env:API_TAG }     else { 'custom-action:latest' }
 $DeployName = if ($env:DEPLOYMENT_NAME) { $env:DEPLOYMENT_NAME } else { 'allenco-connector' }
-$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..' '..')).Path
+$RepoRoot = (Resolve-Path (Join-Path (Join-Path $PSScriptRoot '..') '..')).Path
 
 Write-Host ">> Deploying Container Apps (indexer Job + Custom Action App) from prebuilt images"
 Write-Host "   indexer=$IndexerTag  api=$ApiTag"

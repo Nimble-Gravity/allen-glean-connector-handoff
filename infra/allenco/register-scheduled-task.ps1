@@ -26,7 +26,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
-$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..' '..')).Path
+$RepoRoot = (Resolve-Path (Join-Path (Join-Path $PSScriptRoot '..') '..')).Path
 $Wrapper = Join-Path $RepoRoot 'infra\allenco\run-indexer.ps1'
 if (-not (Test-Path $Wrapper)) { throw "Wrapper not found: $Wrapper" }
 
