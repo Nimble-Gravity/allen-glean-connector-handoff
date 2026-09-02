@@ -18,6 +18,8 @@ permissions, and alerting.
 
 ## Quick start
 
+**macOS / Linux (bash/zsh):**
+
 ```bash
 # Python 3.12+ and Microsoft ODBC Driver 18 for SQL Server required.
 python3.12 -m venv .venv && source .venv/bin/activate
@@ -27,24 +29,70 @@ pip install -r allenco_custom_action/requirements.txt
 cp .env.example .env   # then fill in Glean keys, DB settings, notification channels
 ```
 
+**Windows (PowerShell):**
+
+```powershell
+# Python 3.12+ and Microsoft ODBC Driver 18 for SQL Server required.
+py -3.12 -m venv .venv; .venv\Scripts\Activate.ps1
+pip install -e ".[dev]"
+pip install -r allenco_custom_action/requirements.txt
+
+Copy-Item .env.example .env   # then fill in Glean keys, DB settings, notification channels
+```
+
+> If `Activate.ps1` is blocked, run once per user: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
+
 ### Run the indexer (dry run — no Glean push, exports JSON to `.outputs/`)
+
+macOS/Linux:
 
 ```bash
 GLEAN_ENABLE_INDEXING=false PYTHONPATH=src python -m main
 ```
 
+Windows (PowerShell):
+
+```powershell
+$env:GLEAN_ENABLE_INDEXING = "false"; $env:PYTHONPATH = "src"; python -m main
+```
+
+Windows (cmd.exe):
+
+```cmd
+set GLEAN_ENABLE_INDEXING=false && set PYTHONPATH=src && python -m main
+```
+
 ### Run the Custom Action API
+
+macOS/Linux:
 
 ```bash
 cd allenco_custom_action && uvicorn main:app --reload
 # Swagger UI at http://127.0.0.1:8000/docs
 ```
 
+Windows (PowerShell):
+
+```powershell
+cd allenco_custom_action; uvicorn main:app --reload
+# Swagger UI at http://127.0.0.1:8000/docs
+```
+
 ### Tests & lint
+
+macOS/Linux:
 
 ```bash
 pytest                                 # indexer suite
 cd allenco_custom_action && pytest     # API suite
+ruff check src/ allenco_custom_action/ tests/
+```
+
+Windows (PowerShell):
+
+```powershell
+pytest                                  # indexer suite
+cd allenco_custom_action; pytest        # API suite
 ruff check src/ allenco_custom_action/ tests/
 ```
 

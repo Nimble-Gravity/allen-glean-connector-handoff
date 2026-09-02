@@ -19,5 +19,6 @@ __init__.py
 # Vendored Azure skills (managed via skills-lock.json) — not versioned
 .agents/skills/
 
-# Background/deliverable docs — not versioned
-docs/
+# Local run artifacts — real EMS data / schema dumps; never commit (PII, DB schema)
+ems_documents_*.json
+schema.json
