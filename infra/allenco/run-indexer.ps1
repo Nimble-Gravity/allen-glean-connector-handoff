@@ -46,8 +46,14 @@ Write-Host ">> Logging to: $logFile"
 Push-Location $RepoRoot
 try {
   # Merge stderr into stdout (*>&1) and tee everything to the per-run log.
+  # On Windows PowerShell 5.1, $ErrorActionPreference='Stop' turns each stderr
+  # line from the native process into a terminating NativeCommandError as soon
+  # as Python logs anything (even normal INFO logs land on stderr) — so relax
+  # it to 'Continue' for just this call; $LASTEXITCODE is the real success signal.
+  $ErrorActionPreference = 'Continue'
   & $Python -m main *>&1 | Tee-Object -FilePath $logFile
   $exit = $LASTEXITCODE
+  $ErrorActionPreference = 'Stop'
 }
 finally {
   Pop-Location
