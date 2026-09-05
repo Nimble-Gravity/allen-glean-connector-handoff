@@ -135,9 +135,7 @@ def _patch_read_sql(monkeypatch, df, captured):
 def test_viewspec_full_fetch_omits_watermark(monkeypatch):
     cap = {}
     _patch_read_sql(monkeypatch, pd.DataFrame({"CompanyID": [1]}), cap)
-    spec = ViewSpec(
-        view_name="v_Company", build=lambda df, **k: [], watermark_column="ModifiedDate"
-    )
+    spec = ViewSpec(view_name="v_Company", watermark_column="ModifiedDate")
     spec.fetch(conn=None, since=None)
     assert "WHERE" not in cap["sql"]
     assert cap["params"] is None
@@ -146,32 +144,26 @@ def test_viewspec_full_fetch_omits_watermark(monkeypatch):
 def test_viewspec_incremental_fetch_uses_watermark(monkeypatch):
     cap = {}
     _patch_read_sql(monkeypatch, pd.DataFrame({"CompanyID": [1]}), cap)
-    spec = ViewSpec(
-        view_name="v_Company", build=lambda df, **k: [], watermark_column="ModifiedDate"
-    )
+    spec = ViewSpec(view_name="v_Company", watermark_column="ModifiedDate")
     spec.fetch(conn=None, since="2026-05-01T00:00:00")
     assert "WHERE [ModifiedDate] > ?" in cap["sql"]
     assert "ORDER BY [ModifiedDate]" in cap["sql"]
     assert cap["params"] == ["2026-05-01T00:00:00"]
 
 
-def test_viewspec_build_documents_returns_max_watermark(monkeypatch):
+def test_viewspec_fetch_returns_dataframe(monkeypatch):
     df = pd.DataFrame(
         {"CompanyID": [1, 2], "ModifiedDate": ["2026-05-01T09:00:00", "2026-05-04T09:00:00"]}
     )
     _patch_read_sql(monkeypatch, df, {})
-    spec = ViewSpec(
-        view_name="v_Company",
-        build=lambda df, *, datasource, allowed_users=None: list(range(len(df))),
-        watermark_column="ModifiedDate",
-    )
-    docs, watermark = spec.build_documents(conn=None, datasource="ds")
-    assert len(docs) == 2
-    assert watermark == "2026-05-04T09:00:00"
+    spec = ViewSpec(view_name="v_Company", watermark_column="ModifiedDate")
+    result = spec.fetch(conn=None, since=None)
+    assert len(result) == 2
+    assert result["ModifiedDate"].max() == "2026-05-04T09:00:00"
 
 
-def test_viewspec_no_watermark_column_returns_none(monkeypatch):
+def test_viewspec_watermark_column_none(monkeypatch):
     _patch_read_sql(monkeypatch, pd.DataFrame({"CompanyID": [1]}), {})
-    spec = ViewSpec(view_name="v_Company", build=lambda df, **k: [1], watermark_column=None)
-    _docs, watermark = spec.build_documents(conn=None, datasource="ds")
-    assert watermark is None
+    spec = ViewSpec(view_name="v_Company", watermark_column=None)
+    result = spec.fetch(conn=None, since=None)
+    assert len(result) == 1

@@ -1,253 +1,373 @@
-"""Tests for the generic EMS row→document builder (skeleton mapping)."""
+"""Tests for the Conference Attendance Profile document builder."""
 
 import json
 
 import pandas as pd
 
-from allenco_connector.views._common import _jsonable, rows_to_documents
-from glean_index.index_documents import (
-    dedupe_documents_by_id,
-    set_anonymous_access_where_missing,
+from allenco_connector.views.document_builder import (
+    _build_flags,
+    _build_name_lookup,
+    build_conference_attendance_documents,
 )
-from helpers.json_export import _document_summary
+from glean_index.index_documents import dedupe_documents_by_id, set_anonymous_access_where_missing
+
+# ── Fixtures ──────────────────────────────────────────────────────────────────
 
 
-def test_builds_one_document_per_row():
-    df = pd.DataFrame(
-        [
-            {"AttendeeID": 1, "FirstName": "Ada", "LastName": "Lovelace"},
-            {"AttendeeID": 2, "FirstName": "Alan", "LastName": "Turing"},
-        ]
-    )
-    docs = rows_to_documents(
-        df,
-        object_type="attendee",
-        datasource="allencoems",
-        id_column="AttendeeID",
-        title_columns=("FirstName", "LastName"),
-    )
-    assert len(docs) == 2
-    assert docs[0].id == "attendee:1"  # id is namespaced by object_type
-    assert docs[0].title == "Ada – Lovelace"
-    assert docs[0].datasource == "allencoems"
+def _attendee_row(**kwargs) -> dict:
+    defaults = {
+        "AttendeeID": 1,
+        "EventInstanceID": 10,
+        "Display": 1,
+        "Title": "Managing Partner",
+        "CompanyName": "Acme Capital",
+        "CompanyCategory": "Hedge Fund",
+        "AttendeeCode": "Institutional",
+        "AttendeeCodeType": "Adult",
+        "AttendeeCodeTypeSub": "Main Guest",
+        "AgeAtConf": 40,
+        "IsFirstTimeAttendee": "",
+        "IsAllenWatchlist": False,
+        "IsDeleted": False,
+        "IsInactive": False,
+        "EventCost": 0.0,
+        "RSVPNumberInParty": 1,
+        "RSVPComments": "",
+        "RSVPDietaryAllergyComments": "",
+        "RSVPActivityComments": "",
+        "PreferredCompany": "Acme Capital",
+        "PreferredTitle": "Managing Partner",
+        # flags all off by default
+        "IsLodgingRequired": False,
+        "IsTravelRequired": False,
+        "IsGiftBagRequired": False,
+        "IsCarRentalRequired": None,
+        "isDepartureLetterNeeded": False,
+        "IsSitterAllocated": False,
+        "HasOwnGolfBag": False,
+        "IsAccompaniedByServiceDog": None,
+        "IsVaccinated": False,
+        "IsCovidPreTest": None,
+        "IsWaiverRequired": False,
+        "IsWaiverSigned": None,
+        "IsWaiverOnFile": False,
+        "IsBackgroundCheckRequired": None,
+        "IsBackgroundCheckDone": None,
+        "IsReserveCompanion": False,
+        "IsReserveBabysitter": False,
+        "IsConfirmedDinnerArrangements": False,
+        "IsConfirmedActivityArrangements": None,
+    }
+    defaults.update(kwargs)
+    return defaults
 
 
-def test_missing_id_column_falls_back_to_position():
-    df = pd.DataFrame([{"FirstName": "NoId"}])
-    docs = rows_to_documents(
-        df,
-        object_type="attendee",
+def _catering_row(**kwargs) -> dict:
+    defaults = {
+        "AttendeeID": 1,
+        "EventInstanceID": 10,
+        "FormalName": "Doe, Jane",
+        "InformalName": "Jane Doe",
+        "MainGuestFormalName": "Doe, Jane",
+        "MainGuestInformalName": "Jane Doe",
+        "Activity": "Welcome Dinner",
+        "EventInstanceActivity": "Monday Welcome Dinner",
+        "EventInstanceActivityShort": "Welcome Dinner",
+        "TableNumber": 3,
+        "SeatNumber": 5,
+        "StartDateTime": "2024-07-01T19:00:00",
+        "EndDateTime": "2024-07-01T21:00:00",
+        "AttendeeCode": "Institutional",
+        "AttendeeCodeType": "Adult",
+        "AttendeeCodeTypeSub": "Main Guest",
+        "Company": "Acme Capital",
+    }
+    defaults.update(kwargs)
+    return defaults
+
+
+# ── Name lookup ───────────────────────────────────────────────────────────────
+
+
+def test_name_lookup_built_from_catering():
+    df = pd.DataFrame([
+        _catering_row(AttendeeID=1, FormalName="Ainslie, Lee"),
+        _catering_row(AttendeeID=2, FormalName="Smith, John"),
+    ])
+    lookup = _build_name_lookup(df)
+    assert lookup == {1: "Ainslie, Lee", 2: "Smith, John"}
+
+
+def test_name_lookup_uses_first_non_empty():
+    df = pd.DataFrame([
+        _catering_row(AttendeeID=1, EventInstanceID=10, FormalName="Doe, Jane"),
+        _catering_row(AttendeeID=1, EventInstanceID=20, FormalName="Doe, Janet"),  # first wins
+    ])
+    lookup = _build_name_lookup(df)
+    assert lookup[1] == "Doe, Jane"
+
+
+def test_name_lookup_skips_empty_names():
+    df = pd.DataFrame([_catering_row(AttendeeID=1, FormalName="")])
+    lookup = _build_name_lookup(df)
+    assert 1 not in lookup
+
+
+def test_name_lookup_empty_df():
+    assert _build_name_lookup(pd.DataFrame()) == {}
+
+
+# ── Flag consolidation ────────────────────────────────────────────────────────
+
+
+def test_flags_only_true_values():
+    row = pd.Series({
+        "IsLodgingRequired": True,
+        "IsTravelRequired": False,
+        "IsVaccinated": True,
+        "IsFirstTimeAttendee": "",
+    })
+    flags = _build_flags(row)
+    assert "Lodging Required" in flags
+    assert "Vaccinated" in flags
+    assert "Travel Required" not in flags
+
+
+def test_first_time_flag_from_string_marker():
+    row = pd.Series({"IsFirstTimeAttendee": "***"})
+    assert "First Time Attendee" in _build_flags(row)
+
+
+def test_flags_null_treated_as_false():
+    row = pd.Series({"IsCarRentalRequired": None, "IsFirstTimeAttendee": None})
+    flags = _build_flags(row)
+    assert "Car Rental Required" not in flags
+    assert "First Time Attendee" not in flags
+
+
+# ── Document builder ──────────────────────────────────────────────────────────
+
+
+def test_one_doc_per_attendee_event_pair():
+    df_att = pd.DataFrame([
+        _attendee_row(AttendeeID=1, EventInstanceID=10),
+        _attendee_row(AttendeeID=1, EventInstanceID=20),
+        _attendee_row(AttendeeID=2, EventInstanceID=10),
+    ])
+    docs = build_conference_attendance_documents(
+        df_att,
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
         datasource="ds",
-        id_column="AttendeeID",
-        title_columns=("FirstName",),
     )
-    assert docs[0].id == "attendee:0"
+    assert len(docs) == 3
+    ids = {d.id for d in docs}
+    assert ids == {"1::10", "1::20", "2::10"}
 
 
-def test_document_body_is_json_serialisable_with_coercion():
-    df = pd.DataFrame([{"AttendeeID": 1, "When": pd.Timestamp("2025-01-01"), "Score": 3.5}])
-    docs = rows_to_documents(
-        df,
-        object_type="attendee",
+def test_name_in_title_from_catering():
+    df_att = pd.DataFrame([_attendee_row(AttendeeID=1, EventInstanceID=10)])
+    df_cat = pd.DataFrame([_catering_row(AttendeeID=1, FormalName="Ainslie, Lee")])
+    docs = build_conference_attendance_documents(
+        df_att, df_cat, pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), datasource="ds"
+    )
+    assert docs[0].title == "Ainslie, Lee – Conference #10"
+
+
+def test_fallback_title_when_no_catering():
+    df_att = pd.DataFrame([_attendee_row(AttendeeID=99, EventInstanceID=5)])
+    docs = build_conference_attendance_documents(
+        df_att,
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
         datasource="ds",
-        id_column="AttendeeID",
-        title_columns=(),
+    )
+    assert docs[0].title == "Attendee #99 – Conference #5"
+
+
+def test_cross_event_name_lookup():
+    # AttendeeID=1 has catering only for event 20; their name should appear on event 10 doc too
+    df_att = pd.DataFrame([
+        _attendee_row(AttendeeID=1, EventInstanceID=10),
+        _attendee_row(AttendeeID=1, EventInstanceID=20),
+    ])
+    df_cat = pd.DataFrame([
+        _catering_row(AttendeeID=1, EventInstanceID=20, FormalName="Lee, Ainslie"),
+    ])
+    docs = build_conference_attendance_documents(
+        df_att, df_cat, pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), datasource="ds"
+    )
+    titles = {d.title for d in docs}
+    assert titles == {"Lee, Ainslie – Conference #10", "Lee, Ainslie – Conference #20"}
+
+
+def test_deleted_rows_skipped():
+    df_att = pd.DataFrame([
+        _attendee_row(AttendeeID=1, EventInstanceID=10, IsDeleted=True),
+        _attendee_row(AttendeeID=2, EventInstanceID=10, IsDeleted=False),
+    ])
+    docs = build_conference_attendance_documents(
+        df_att,
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        datasource="ds",
+    )
+    assert len(docs) == 1
+    assert docs[0].id == "2::10"
+
+
+def test_inactive_rows_skipped():
+    df_att = pd.DataFrame([
+        _attendee_row(AttendeeID=1, EventInstanceID=10, IsInactive=True),
+    ])
+    docs = build_conference_attendance_documents(
+        df_att,
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        datasource="ds",
+    )
+    assert docs == []
+
+
+def test_body_has_no_raw_boolean_keys():
+    df_att = pd.DataFrame([_attendee_row(AttendeeID=1, EventInstanceID=10, IsTravelRequired=True)])
+    docs = build_conference_attendance_documents(
+        df_att,
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        datasource="ds",
     )
     body = json.loads(docs[0].body.text_content)
-    assert body["When"] == "2025-01-01T00:00:00"
-    assert body["Score"] == 3.5
+    # None of the raw boolean column names should appear in the body
+    assert "IsTravelRequired" not in body
+    assert "IsLodgingRequired" not in body
+    assert "isDepartureLetterNeeded" not in body
+    # But the flags list should be present
+    assert "flags" in body
+    assert "Travel Required" in body["flags"]
 
 
-def test_jsonable_coerces_timestamp_nan_and_none():
-    assert _jsonable(pd.Timestamp("2025-01-02T03:04:05")) == "2025-01-02T03:04:05"
-    assert _jsonable(float("nan")) is None
-    assert _jsonable(None) is None
-    assert _jsonable("plain") == "plain"
+def test_body_contains_catering_section():
+    df_att = pd.DataFrame([_attendee_row(AttendeeID=1, EventInstanceID=10)])
+    df_cat = pd.DataFrame([
+        _catering_row(AttendeeID=1, EventInstanceID=10, TableNumber=7, SeatNumber=2),
+    ])
+    docs = build_conference_attendance_documents(
+        df_att, df_cat, pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), datasource="ds"
+    )
+    body = json.loads(docs[0].body.text_content)
+    assert len(body["catering"]) == 1
+    assert body["catering"][0]["table"] == 7
+    assert body["catering"][0]["seat"] == 2
 
 
-def test_set_anonymous_access_where_missing():
-    # a document built without allowed_users has no permissions
-    docs = rows_to_documents(
-        pd.DataFrame([{"AttendeeID": 1}]),
-        object_type="attendee",
+def test_body_catering_empty_list_when_no_rows():
+    df_att = pd.DataFrame([_attendee_row(AttendeeID=1, EventInstanceID=10)])
+    docs = build_conference_attendance_documents(
+        df_att,
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
         datasource="ds",
-        id_column="AttendeeID",
-        title_columns=(),
+    )
+    body = json.loads(docs[0].body.text_content)
+    assert body["catering"] == []
+
+
+def test_custom_properties_contain_ids():
+    df_att = pd.DataFrame([_attendee_row(AttendeeID=5, EventInstanceID=12)])
+    docs = build_conference_attendance_documents(
+        df_att,
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        datasource="ds",
+    )
+    props = {p.name: p.value for p in docs[0].custom_properties}
+    assert props["attendeeId"] == "5"
+    assert props["eventInstanceId"] == "12"
+
+
+def test_object_type_is_conference_attendance():
+    df_att = pd.DataFrame([_attendee_row()])
+    docs = build_conference_attendance_documents(
+        df_att,
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        datasource="ds",
+    )
+    assert docs[0].object_type == "conferenceAttendance"
+
+
+def test_empty_attendee_df_returns_no_docs():
+    docs = build_conference_attendance_documents(
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        datasource="ds",
+    )
+    assert docs == []
+
+
+def test_no_duplicate_ids():
+    df_att = pd.DataFrame([
+        _attendee_row(AttendeeID=1, EventInstanceID=10),
+        _attendee_row(AttendeeID=1, EventInstanceID=10),  # duplicate input row
+        _attendee_row(AttendeeID=2, EventInstanceID=10),
+    ])
+    docs = build_conference_attendance_documents(
+        df_att,
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        datasource="ds",
+    )
+    _, dropped = dedupe_documents_by_id(docs)
+    assert dropped == 0  # groupby collapses duplicate input rows
+
+
+def test_set_anonymous_access_when_no_allowed_users():
+    df_att = pd.DataFrame([_attendee_row()])
+    docs = build_conference_attendance_documents(
+        df_att,
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        datasource="ds",
     )
     assert docs[0].permissions is None
     updated = set_anonymous_access_where_missing(docs)
     assert updated == 1
-    assert docs[0].permissions is not None
     assert docs[0].permissions.allow_anonymous_access is True
 
 
-def test_view_url_base_stamps_per_row_url():
-    df = pd.DataFrame([{"AttendeeID": 7}])
-    docs = rows_to_documents(
-        df,
-        object_type="attendee",
+def test_view_url_stamped_on_document():
+    df_att = pd.DataFrame([_attendee_row()])
+    docs = build_conference_attendance_documents(
+        df_att,
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
         datasource="ds",
-        id_column="AttendeeID",
-        title_columns=(),
-        view_url_base="https://ems.allenco.com/",
-    )
-    assert docs[0].view_url == "https://ems.allenco.com/attendee/7"
-
-
-def test_fixed_view_url_stamped_verbatim_and_overrides_base():
-    # The client's EMS has no per-record page: every doc deep-links to one fixed URL
-    # (http://ems3/#/home). A fixed view_url must be used verbatim on EVERY row and
-    # take precedence over the per-row view_url_base.
-    df = pd.DataFrame([{"AttendeeID": 1}, {"AttendeeID": 2}])
-    docs = rows_to_documents(
-        df,
-        object_type="attendeeConf",
-        datasource="ds",
-        id_column="AttendeeID",
-        title_columns=(),
         view_url="http://ems3/#/home",
-        view_url_base="https://ignored.example.com",
     )
-    assert [d.view_url for d in docs] == ["http://ems3/#/home", "http://ems3/#/home"]
-
-
-def test_dedupe_documents_by_id_collapses_duplicates():
-    # two rows share AttendeeID=1 → same document id "attendee:1"
-    df = pd.DataFrame([{"AttendeeID": 1}, {"AttendeeID": 1}, {"AttendeeID": 2}])
-    docs = rows_to_documents(
-        df, object_type="attendee", datasource="ds", id_column="AttendeeID", title_columns=()
-    )
-    deduped, dropped = dedupe_documents_by_id(docs)
-    assert dropped == 1
-    assert sorted(d.id for d in deduped) == ["attendee:1", "attendee:2"]
-
-
-def test_id_columns_builds_composite_key_unique_per_row():
-    # Two flights for the same attendee: a single AttendeeID key would collide and be
-    # deduped away; the composite (AttendeeID, EventInstanceID, FlightNo) stays unique.
-    df = pd.DataFrame(
-        [
-            {"AttendeeID": 1, "EventInstanceID": "SV26", "FlightNo": "AA100"},
-            {"AttendeeID": 1, "EventInstanceID": "SV26", "FlightNo": "AA200"},
-        ]
-    )
-    docs = rows_to_documents(
-        df,
-        object_type="travelAir",
-        datasource="ds",
-        id_column="AttendeeID",
-        id_columns=("AttendeeID", "EventInstanceID", "FlightNo"),
-        title_columns=(),
-    )
-    ids = [d.id for d in docs]
-    assert ids == ["travelAir:1:SV26:AA100", "travelAir:1:SV26:AA200"]
-    deduped, dropped = dedupe_documents_by_id(docs)
-    assert dropped == 0  # composite key prevents the collision
-
-
-def test_id_columns_skips_null_parts_and_falls_back_to_position():
-    df = pd.DataFrame([{"AttendeeID": None, "EventInstanceID": None}])
-    docs = rows_to_documents(
-        df,
-        object_type="attendeeConf",
-        datasource="ds",
-        id_column="AttendeeID",
-        id_columns=("AttendeeID", "EventInstanceID"),
-        title_columns=(),
-    )
-    assert docs[0].id == "attendeeConf:0"  # all key parts null → row position
-
-
-def test_property_columns_emit_custom_properties_and_stay_in_body():
-    df = pd.DataFrame([{"AttendeeID": 1, "EventInstanceID": "SV26", "FirstName": "Ada"}])
-    docs = rows_to_documents(
-        df,
-        object_type="attendeeConf",
-        datasource="ds",
-        id_column="AttendeeID",
-        title_columns=("FirstName",),
-        property_columns=("EventInstanceID", "AttendeeID"),
-    )
-    props = {p.name: p.value for p in docs[0].custom_properties}
-    # custom-property values go up as strings (declared TEXT on the datasource)
-    assert props == {"EventInstanceID": "SV26", "AttendeeID": "1"}
-    body = json.loads(docs[0].body.text_content)
-    assert body["EventInstanceID"] == "SV26"  # body keeps the native value
-    assert body["AttendeeID"] == 1
-
-
-def test_property_columns_skip_missing_and_null():
-    df = pd.DataFrame([{"AttendeeID": 1, "EventInstanceID": None}])
-    docs = rows_to_documents(
-        df,
-        object_type="attendeeConf",
-        datasource="ds",
-        id_column="AttendeeID",
-        title_columns=(),
-        property_columns=("EventInstanceID", "MissingCol"),
-    )
-    # null EventInstanceID and absent MissingCol both skipped → no custom properties
-    assert docs[0].custom_properties == []
-
-
-def test_exclude_columns_dropped_from_body_case_insensitive():
-    df = pd.DataFrame([{"AttendeeID": 1, "DOB": "1990-01-01", "FirstName": "Ada"}])
-    docs = rows_to_documents(
-        df,
-        object_type="attendee",
-        datasource="ds",
-        id_column="AttendeeID",
-        title_columns=("FirstName",),
-        exclude_columns=("dob",),  # exact, case-insensitive
-    )
-    body = json.loads(docs[0].body.text_content)
-    assert "DOB" not in body  # sensitive column redacted
-    assert body["FirstName"] == "Ada"
-    assert body["AttendeeID"] == 1
-
-
-def test_exclude_columns_glob_drops_all_license_variants():
-    # A wildcard pattern must catch every license column, incl. ones an exact list misses.
-    df = pd.DataFrame(
-        [
-            {
-                "AttendeeID": 1,
-                "LicenseName": "X",
-                "LicenseState": "CA",
-                "LicenseCountryName": "US",
-                "DietaryAllergyComments": "peanuts",
-                "FirstName": "Ada",
-            }
-        ]
-    )
-    docs = rows_to_documents(
-        df,
-        object_type="travelGround",
-        datasource="ds",
-        id_column="AttendeeID",
-        title_columns=(),
-        exclude_columns=("License*", "DOB"),
-    )
-    body = json.loads(docs[0].body.text_content)
-    assert "LicenseName" not in body
-    assert "LicenseState" not in body
-    assert "LicenseCountryName" not in body  # glob catches the variant an exact list would miss
-    assert body["DietaryAllergyComments"] == "peanuts"  # dietary/allergy kept (must-have)
-    assert body["FirstName"] == "Ada"
-
-
-def test_document_summary_includes_viewurl_and_custom_properties():
-    docs = rows_to_documents(
-        pd.DataFrame([{"AttendeeID": 1, "EventInstanceID": "SV26"}]),
-        object_type="attendeeConf",
-        datasource="ds",
-        id_column="AttendeeID",
-        id_columns=("AttendeeID", "EventInstanceID"),
-        title_columns=(),
-        property_columns=("EventInstanceID",),
-        view_url_base="https://ems.allenco.com",
-    )
-    summary = _document_summary(docs[0])
-    assert summary["id"] == "attendeeConf:1:SV26"
-    assert summary["viewUrl"] == "https://ems.allenco.com/attendeeConf/1:SV26"
-    assert summary["customProperties"] == [{"name": "EventInstanceID", "value": "SV26"}]
+    assert docs[0].view_url == "http://ems3/#/home"

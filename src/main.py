@@ -20,6 +20,7 @@ from allenco_connector.db_connection import get_connection
 from allenco_connector.groups import load_users_with_groups
 from allenco_connector.sync_state import build_sync_state_store
 from allenco_connector.views.catalog import VIEW_CATALOG
+from allenco_connector.views.document_builder import build_conference_attendance_documents
 from allenco_connector.views.registry import build_view_specs
 from config.config import (
     ConnectorSettings,
@@ -120,55 +121,41 @@ def main() -> int:
         raise
 
 
-def _fetch_documents(
+def _fetch_all_views(
     specs: Iterable,
     conn: pyodbc.Connection,
     *,
-    datasource: str,
-    allowed_refs: list,
-    sync_state,
-    sync_store,
-    use_incremental: bool,
     notify: Callable[..., None],
-) -> tuple[list, list[str], int]:
-    """Fetch + build documents across all view specs, resiliently.
+) -> tuple[dict, list[str]]:
+    """Fetch all enabled views as DataFrames, resiliently.
 
     A single view failing (e.g. a cross-DB binding error like ConferenceImage, or a
     missing SELECT grant) must NOT abort the whole run — the view is logged, reported
-    (ErrorType.VIEW_FETCH), and skipped so the remaining views still index. Returns
-    ``(documents, failed_views, records_fetched)``.
+    (ErrorType.VIEW_FETCH), and skipped. Returns ``(dfs_by_view_name, failed_views)``.
+
+    All views are fetched in full (no incremental watermarking) because the document
+    model groups across multiple views: a catering change won't bump the attendee
+    row's UpdatedOn, so per-view watermarks would silently miss updates.
     """
-    documents: list = []
+    import pandas as pd
+
+    dfs: dict[str, pd.DataFrame] = {}
     failed_views: list[str] = []
-    records = 0
     for spec in specs:
-        since = sync_state.watermark_for(spec.view_name) if use_incremental else None
-        logger.info(
-            "Fetching %s (%s).",
-            spec.view_name,
-            f"incremental since {since}" if since else "full",
-        )
+        logger.info("Fetching %s (full).", spec.view_name)
         try:
-            docs, new_watermark = spec.build_documents(
-                conn,
-                datasource=datasource,
-                allowed_users=allowed_refs or None,
-                since=since,
-            )
+            df = spec.fetch(conn, since=None)
+            dfs[spec.view_name] = df
+            logger.info("Fetched %s: %d rows.", spec.view_name, len(df))
         except Exception as exc:
             failed_views.append(spec.view_name)
-            logger.exception("View %s failed to fetch/build; skipping.", spec.view_name)
+            logger.exception("View %s failed to fetch; skipping.", spec.view_name)
             notify(
                 ErrorType.VIEW_FETCH,
-                f"View {spec.view_name} failed to fetch/build: {exc}",
+                f"View {spec.view_name} failed to fetch: {exc}",
                 detail=traceback.format_exc(),
             )
-            continue
-        documents.extend(docs)
-        records += len(docs)
-        if sync_store.incremental and new_watermark is not None:
-            sync_state.set_watermark(spec.view_name, new_watermark, count=len(docs))
-    return documents, failed_views, records
+    return dfs, failed_views
 
 
 def _run(
@@ -187,8 +174,6 @@ def _run(
     # default; file/blob backends enable incremental fetch per view watermark.
     sync_store = build_sync_state_store()
     sync_state = sync_store.load()
-    # full_refresh forces a complete re-index and resets watermarks to the new max.
-    use_incremental = sync_store.incremental and not full_refresh
 
     # Glean prerequisites (only strictly required when actually indexing).
     datasource = settings.glean_datasource.strip()
@@ -246,36 +231,29 @@ def _run(
             "GLEAN_ENABLE_INDEXING=true with NO FETCH_ROW_LIMIT — this will push EVERY "
             "row of every view (potentially millions). Set FETCH_ROW_LIMIT for a bounded run."
         )
-    if settings.exclude_columns:
-        logger.info(
-            "EXCLUDE_COLUMNS — dropping %d column(s) from document bodies: %s",
-            len(settings.exclude_columns),
-            ", ".join(settings.exclude_columns),
-        )
-
     documents: list = []
     failed_views: list[str] = []
     if conn is not None:
         try:
+            import pandas as pd
+
             specs = build_view_specs(
                 VIEW_CATALOG,
                 default_schema=db_settings.schema,
                 row_limit=settings.fetch_row_limit,
-                exclude_columns=settings.exclude_columns,
-                view_url_base=settings.view_url_base,
+            )
+            dfs, failed_views = _fetch_all_views(specs, conn, notify=notify)
+            documents = build_conference_attendance_documents(
+                df_attendee=dfs.get("v_EventInstance_Attendee", pd.DataFrame()),
+                df_catering=dfs.get("v_Catering_TableAssignment", pd.DataFrame()),
+                df_activities=dfs.get("v_Activity_Attendee_TimeRange", pd.DataFrame()),
+                df_air=dfs.get("v_TravelAir", pd.DataFrame()),
+                df_ground=dfs.get("v_TravelGround", pd.DataFrame()),
+                datasource=datasource,
+                allowed_users=allowed_refs or None,
                 view_url=settings.view_url,
             )
-            documents, failed_views, fetched = _fetch_documents(
-                specs,
-                conn,
-                datasource=datasource,
-                allowed_refs=allowed_refs,
-                sync_state=sync_state,
-                sync_store=sync_store,
-                use_incremental=use_incremental,
-                notify=notify,
-            )
-            state.records_fetched += fetched
+            state.records_fetched = sum(len(df) for df in dfs.values())
         finally:
             conn.close()
 

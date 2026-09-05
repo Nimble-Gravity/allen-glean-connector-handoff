@@ -29,7 +29,8 @@ def test_granted_when_user_in_an_allowed_group(monkeypatch):
 def test_denied_when_user_not_in_allowed_group(monkeypatch):
     monkeypatch.setenv("GLEAN_ALLOWED_GROUPS", "Admins")
     user = GlobalUser(datasource_user_id="id1", email="a@allenandco.com", groups=("EMS-Readers",))
-    assert user_may_access_indexed_document(user, IndexedDocumentKind.COMPANY) is False
+    kind = IndexedDocumentKind.CONFERENCE_ATTENDANCE
+    assert user_may_access_indexed_document(user, kind) is False
 
 
 def test_global_user_carries_groups():

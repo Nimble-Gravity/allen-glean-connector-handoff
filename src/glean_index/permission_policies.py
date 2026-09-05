@@ -20,12 +20,9 @@ from glean_index.types.users import GlobalUser
 
 
 class IndexedDocumentKind(StrEnum):
-    """The kinds of documents the indexer pushes — one per EMS view in scope."""
+    """The kinds of documents the indexer pushes."""
 
-    ATTENDEE = "attendee"
-    ATTENDEE_EVENT = "attendee_event"
-    COMPANY = "company"
-    PARTICIPATION = "participation"
+    CONFERENCE_ATTENDANCE = "conferenceAttendance"
 
 
 def load_allowed_groups() -> frozenset[str]:
@@ -50,12 +47,7 @@ def user_may_access_indexed_document(user: GlobalUser, kind: IndexedDocumentKind
     when a kind needs a distinct group.
     """
     match kind:
-        case (
-            IndexedDocumentKind.ATTENDEE
-            | IndexedDocumentKind.ATTENDEE_EVENT
-            | IndexedDocumentKind.COMPANY
-            | IndexedDocumentKind.PARTICIPATION
-        ):
+        case IndexedDocumentKind.CONFERENCE_ATTENDANCE:
             return bool(load_allowed_groups().intersection(user.groups))
         case _:  # pragma: no cover - exhaustiveness guard
             assert_never(kind)
