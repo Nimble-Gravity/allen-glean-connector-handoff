@@ -31,10 +31,13 @@ $Action = New-ScheduledTaskAction `
   -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$Wrapper`"" `
   -WorkingDirectory $RepoRoot
 
-# Repeat every $IntervalMinutes, indefinitely, starting now.
+# Repeat every $IntervalMinutes, effectively indefinitely, starting now.
+# [TimeSpan]::MaxValue overflows the ISO-8601 duration Task Scheduler's XML
+# schema accepts (HRESULT 0x80041318); 10 years is Task Scheduler's own
+# convention for "repeat forever" and re-registering (-Force) resets it anyway.
 $Trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) `
   -RepetitionInterval (New-TimeSpan -Minutes $IntervalMinutes) `
-  -RepetitionDuration ([TimeSpan]::MaxValue)
+  -RepetitionDuration (New-TimeSpan -Days 3650)
 
 # StartWhenAvailable → catch up after a reboot/missed slot; no network
 # requirement (the watchdog only touches the local uvicorn process); short
