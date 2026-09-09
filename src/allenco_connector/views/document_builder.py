@@ -384,7 +384,7 @@ def build_conference_attendance_documents(
         attendee_code = payload.get("attendee_type", "").split(" –")[0].strip()
 
         custom_props = [
-            CustomProperty(name="attendeeId", value=str(attendee_id)),
+            CustomProperty(name="attendeeName", value=name),
             CustomProperty(name="eventInstanceId", value=str(event_id)),
         ]
         if company:

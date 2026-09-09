@@ -285,18 +285,19 @@ def test_body_catering_empty_list_when_no_rows():
     assert body["catering"] == []
 
 
-def test_custom_properties_contain_ids():
+def test_custom_properties():
     df_att = pd.DataFrame([_attendee_row(AttendeeID=5, EventInstanceID=12)])
+    df_cat = pd.DataFrame([_catering_row(AttendeeID=5, EventInstanceID=12, FormalName="Ainslie, Lee")])
     docs = build_conference_attendance_documents(
         df_att,
-        pd.DataFrame(),
+        df_cat,
         pd.DataFrame(),
         pd.DataFrame(),
         pd.DataFrame(),
         datasource="ds",
     )
     props = {p.name: p.value for p in docs[0].custom_properties}
-    assert props["attendeeId"] == "5"
+    assert props["attendeeName"] == "Ainslie, Lee"
     assert props["eventInstanceId"] == "12"
 
 

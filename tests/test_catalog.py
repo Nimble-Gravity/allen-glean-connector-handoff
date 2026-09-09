@@ -93,3 +93,15 @@ def test_watermark_column_propagated():
     entry = ViewCatalogEntry(view_name="v_X", watermark_column="UpdatedOn")
     (spec,) = build_view_specs([entry], default_schema="dbo")
     assert spec.watermark_column == "UpdatedOn"
+
+
+def test_primary_view_declares_custom_property_columns():
+    """v_EventInstance_Attendee must declare all props emitted by document_builder."""
+    primary = next(e for e in VIEW_CATALOG if e.view_name == "v_EventInstance_Attendee")
+    assert set(primary.property_columns) == {"attendeeName", "eventInstanceId", "company", "attendeeCode"}
+
+
+def test_secondary_views_have_no_property_columns():
+    """Detail views aggregate into the same document; they don't declare extra props."""
+    secondary = [e for e in VIEW_CATALOG if e.view_name != "v_EventInstance_Attendee"]
+    assert all(e.property_columns == () for e in secondary)

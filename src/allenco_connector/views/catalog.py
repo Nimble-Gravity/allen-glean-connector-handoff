@@ -40,12 +40,20 @@ class ViewCatalogEntry:
                       always full-fetch this view.
     schema:           SQL schema; None inherits the run's DB_SCHEMA default.
     enabled:          False → skipped by build_view_specs (not fetched/indexed).
+    object_type:      Glean object type for documents built from this view.
+                      Must match the object_type passed to build_document().
+    property_columns: Custom property names to register on the Glean datasource.
+                      setup_datasource.py reads these to call PropertyDefinition.
+                      Only the primary view needs to declare them (secondary views
+                      aggregate into the same document and share the same props).
     """
 
     view_name: str
     watermark_column: str | None = None
     schema: str | None = None
     enabled: bool = True
+    object_type: str = "conferenceAttendance"
+    property_columns: tuple[str, ...] = ()
 
 
 # The rpt (report) schema. Columns confirmed against the real DB and each view's BIND
@@ -59,10 +67,13 @@ class ViewCatalogEntry:
 VIEW_CATALOG: tuple[ViewCatalogEntry, ...] = (
     # ══ Binds today (no ConferenceImage) — ENABLED ═══════════════════════════════
     # Tier 2 — registration record. UpdatedOn is available for future incremental sync.
+    # property_columns declares every custom property emitted by document_builder so
+    # setup_datasource.py registers them with Glean before the first index run.
     ViewCatalogEntry(
         view_name="v_EventInstance_Attendee",
         watermark_column="UpdatedOn",
         schema="rpt",
+        property_columns=("attendeeName", "eventInstanceId", "company", "attendeeCode"),
     ),
     # Tier 3 — per-conference detail. v_Catering_TableAssignment carries FormalName
     # (the only bindable view with a person name).
