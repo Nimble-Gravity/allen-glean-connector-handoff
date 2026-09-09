@@ -365,8 +365,8 @@ def build_conference_attendance_documents(
     for attendee_id, attendee_group in df_attendee.groupby("AttendeeID"):
         name = name_lookup.get(int(attendee_id), f"Attendee #{attendee_id}")
         events_data: list[dict] = []
-        first_company = ""
-        first_code = ""
+        latest_company = ""
+        latest_code = ""
 
         for event_id, event_group in attendee_group.groupby("EventInstanceID"):
             reg_row = event_group.iloc[0]
@@ -381,10 +381,11 @@ def build_conference_attendance_documents(
                 ground_idx.get(key, pd.DataFrame()),
             )
 
-            if not first_company:
-                first_company = event_payload.get("company", "")
-            if not first_code:
-                first_code = event_payload.get("attendee_type", "").split(" –")[0].strip()
+            # Overwrite each iteration — groupby sorts ascending so the last
+            # event processed is the most recent, giving current company/code.
+            if event_payload.get("company"):
+                latest_company = event_payload["company"]
+            latest_code = event_payload.get("attendee_type", "").split(" –")[0].strip() or latest_code
 
             events_data.append(event_payload)
 
@@ -395,10 +396,10 @@ def build_conference_attendance_documents(
         }
 
         custom_props = [CustomProperty(name="attendeeName", value=name)]
-        if first_company:
-            custom_props.append(CustomProperty(name="company", value=first_company))
-        if first_code:
-            custom_props.append(CustomProperty(name="attendeeCode", value=first_code))
+        if latest_company:
+            custom_props.append(CustomProperty(name="company", value=latest_company))
+        if latest_code:
+            custom_props.append(CustomProperty(name="attendeeCode", value=latest_code))
 
         documents.append(
             build_document(
