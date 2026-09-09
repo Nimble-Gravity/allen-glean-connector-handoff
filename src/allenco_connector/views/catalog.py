@@ -73,7 +73,7 @@ VIEW_CATALOG: tuple[ViewCatalogEntry, ...] = (
         view_name="v_EventInstance_Attendee",
         watermark_column="UpdatedOn",
         schema="rpt",
-        property_columns=("attendeeName", "eventInstanceId", "company", "attendeeCode"),
+        property_columns=("attendeeName", "company", "attendeeCode"),
     ),
     # Tier 3 — per-conference detail. v_Catering_TableAssignment carries FormalName
     # (the only bindable view with a person name).

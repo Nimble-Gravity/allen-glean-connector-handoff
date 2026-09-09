@@ -148,7 +148,8 @@ def test_flags_null_treated_as_false():
 # ── Document builder ──────────────────────────────────────────────────────────
 
 
-def test_one_doc_per_attendee_event_pair():
+def test_one_doc_per_attendee():
+    # (1,10), (1,20), (2,10) → 2 docs: one per unique AttendeeID
     df_att = pd.DataFrame([
         _attendee_row(AttendeeID=1, EventInstanceID=10),
         _attendee_row(AttendeeID=1, EventInstanceID=20),
@@ -162,9 +163,12 @@ def test_one_doc_per_attendee_event_pair():
         pd.DataFrame(),
         datasource="ds",
     )
-    assert len(docs) == 3
+    assert len(docs) == 2
     ids = {d.id for d in docs}
-    assert ids == {"1::10", "1::20", "2::10"}
+    assert ids == {"attendee::1", "attendee::2"}
+    doc1 = next(d for d in docs if d.id == "attendee::1")
+    body = json.loads(doc1.body.text_content)
+    assert len(body["events"]) == 2
 
 
 def test_name_in_title_from_catering():
@@ -173,7 +177,7 @@ def test_name_in_title_from_catering():
     docs = build_conference_attendance_documents(
         df_att, df_cat, pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), datasource="ds"
     )
-    assert docs[0].title == "Ainslie, Lee – Conference #10"
+    assert docs[0].title == "Ainslie, Lee"
 
 
 def test_fallback_title_when_no_catering():
@@ -186,11 +190,11 @@ def test_fallback_title_when_no_catering():
         pd.DataFrame(),
         datasource="ds",
     )
-    assert docs[0].title == "Attendee #99 – Conference #5"
+    assert docs[0].title == "Attendee #99"
 
 
 def test_cross_event_name_lookup():
-    # AttendeeID=1 has catering only for event 20; their name should appear on event 10 doc too
+    # AttendeeID=1 has catering only for event 20; name resolves cross-event → 1 doc with 2 events
     df_att = pd.DataFrame([
         _attendee_row(AttendeeID=1, EventInstanceID=10),
         _attendee_row(AttendeeID=1, EventInstanceID=20),
@@ -201,8 +205,10 @@ def test_cross_event_name_lookup():
     docs = build_conference_attendance_documents(
         df_att, df_cat, pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), datasource="ds"
     )
-    titles = {d.title for d in docs}
-    assert titles == {"Lee, Ainslie – Conference #10", "Lee, Ainslie – Conference #20"}
+    assert len(docs) == 1
+    assert docs[0].title == "Lee, Ainslie"
+    body = json.loads(docs[0].body.text_content)
+    assert len(body["events"]) == 2
 
 
 def test_deleted_rows_skipped():
@@ -219,7 +225,7 @@ def test_deleted_rows_skipped():
         datasource="ds",
     )
     assert len(docs) == 1
-    assert docs[0].id == "2::10"
+    assert docs[0].id == "attendee::2"
 
 
 def test_inactive_rows_skipped():
@@ -248,13 +254,14 @@ def test_body_has_no_raw_boolean_keys():
         datasource="ds",
     )
     body = json.loads(docs[0].body.text_content)
-    # None of the raw boolean column names should appear in the body
-    assert "IsTravelRequired" not in body
-    assert "IsLodgingRequired" not in body
-    assert "isDepartureLetterNeeded" not in body
+    event = body["events"][0]
+    # None of the raw boolean column names should appear in the event entry
+    assert "IsTravelRequired" not in event
+    assert "IsLodgingRequired" not in event
+    assert "isDepartureLetterNeeded" not in event
     # But the flags list should be present
-    assert "flags" in body
-    assert "Travel Required" in body["flags"]
+    assert "flags" in event
+    assert "Travel Required" in event["flags"]
 
 
 def test_body_contains_catering_section():
@@ -266,9 +273,9 @@ def test_body_contains_catering_section():
         df_att, df_cat, pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), datasource="ds"
     )
     body = json.loads(docs[0].body.text_content)
-    assert len(body["catering"]) == 1
-    assert body["catering"][0]["table"] == 7
-    assert body["catering"][0]["seat"] == 2
+    assert len(body["events"][0]["catering"]) == 1
+    assert body["events"][0]["catering"][0]["table"] == 7
+    assert body["events"][0]["catering"][0]["seat"] == 2
 
 
 def test_body_catering_empty_list_when_no_rows():
@@ -282,7 +289,7 @@ def test_body_catering_empty_list_when_no_rows():
         datasource="ds",
     )
     body = json.loads(docs[0].body.text_content)
-    assert body["catering"] == []
+    assert body["events"][0]["catering"] == []
 
 
 def test_custom_properties():
@@ -298,7 +305,7 @@ def test_custom_properties():
     )
     props = {p.name: p.value for p in docs[0].custom_properties}
     assert props["attendeeName"] == "Ainslie, Lee"
-    assert props["eventInstanceId"] == "12"
+    assert "eventInstanceId" not in props
 
 
 def test_object_type_is_conference_attendance():
@@ -340,8 +347,11 @@ def test_no_duplicate_ids():
         pd.DataFrame(),
         datasource="ds",
     )
+    assert len(docs) == 2
+    ids = {d.id for d in docs}
+    assert ids == {"attendee::1", "attendee::2"}
     _, dropped = dedupe_documents_by_id(docs)
-    assert dropped == 0  # groupby collapses duplicate input rows
+    assert dropped == 0
 
 
 def test_set_anonymous_access_when_no_allowed_users():

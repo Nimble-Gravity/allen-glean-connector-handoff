@@ -362,42 +362,50 @@ def build_conference_attendance_documents(
     allowed = list(allowed_users or [])
     documents: list[DocumentDefinition] = []
 
-    for (attendee_id, event_id), group in df_attendee.groupby(
-        ["AttendeeID", "EventInstanceID"]
-    ):
-        reg_row = group.iloc[0]
-        key = (attendee_id, event_id)
-
+    for attendee_id, attendee_group in df_attendee.groupby("AttendeeID"):
         name = name_lookup.get(int(attendee_id), f"Attendee #{attendee_id}")
-        doc_title = f"{name} – Conference #{event_id}"
+        events_data: list[dict] = []
+        first_company = ""
+        first_code = ""
 
-        payload = _build_payload(
-            reg_row,
-            name,
-            catering_idx.get(key, pd.DataFrame()),
-            activities_idx.get(key, pd.DataFrame()),
-            air_idx.get(key, pd.DataFrame()),
-            ground_idx.get(key, pd.DataFrame()),
-        )
+        for event_id, event_group in attendee_group.groupby("EventInstanceID"):
+            reg_row = event_group.iloc[0]
+            key = (attendee_id, event_id)
 
-        company = payload.get("company", "")
-        attendee_code = payload.get("attendee_type", "").split(" –")[0].strip()
+            event_payload = _build_payload(
+                reg_row,
+                name,
+                catering_idx.get(key, pd.DataFrame()),
+                activities_idx.get(key, pd.DataFrame()),
+                air_idx.get(key, pd.DataFrame()),
+                ground_idx.get(key, pd.DataFrame()),
+            )
 
-        custom_props = [
-            CustomProperty(name="attendeeName", value=name),
-            CustomProperty(name="eventInstanceId", value=str(event_id)),
-        ]
-        if company:
-            custom_props.append(CustomProperty(name="company", value=company))
-        if attendee_code:
-            custom_props.append(CustomProperty(name="attendeeCode", value=attendee_code))
+            if not first_company:
+                first_company = event_payload.get("company", "")
+            if not first_code:
+                first_code = event_payload.get("attendee_type", "").split(" –")[0].strip()
+
+            events_data.append(event_payload)
+
+        payload = {
+            "attendee_id": int(attendee_id),
+            "name": name,
+            "events": events_data,
+        }
+
+        custom_props = [CustomProperty(name="attendeeName", value=name)]
+        if first_company:
+            custom_props.append(CustomProperty(name="company", value=first_company))
+        if first_code:
+            custom_props.append(CustomProperty(name="attendeeCode", value=first_code))
 
         documents.append(
             build_document(
                 object_type=_OBJECT_TYPE,
                 datasource=datasource,
-                document_id=f"{attendee_id}::{event_id}",
-                title=doc_title,
+                document_id=f"attendee::{attendee_id}",
+                title=name,
                 view_url=view_url or None,
                 body_payload=payload,
                 allowed_users=allowed or None,
