@@ -251,7 +251,7 @@ def _run(
                 df_ground=dfs.get("v_TravelGround", pd.DataFrame()),
                 datasource=datasource,
                 allowed_users=allowed_refs or None,
-                view_url=settings.view_url,
+                view_url=settings.view_url or settings.view_url_base,
             )
             state.records_fetched = sum(len(df) for df in dfs.values())
         finally:
