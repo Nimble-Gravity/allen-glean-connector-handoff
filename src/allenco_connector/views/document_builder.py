@@ -397,7 +397,7 @@ def build_conference_attendance_documents(
 
         custom_props = [CustomProperty(name="attendeeName", value=name)]
         if latest_company:
-            custom_props.append(CustomProperty(name="company", value=latest_company))
+            custom_props.append(CustomProperty(name="attendeeCompany", value=latest_company))
         if latest_code:
             custom_props.append(CustomProperty(name="attendeeCode", value=latest_code))
 

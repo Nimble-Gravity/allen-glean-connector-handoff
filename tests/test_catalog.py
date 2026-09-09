@@ -98,7 +98,7 @@ def test_watermark_column_propagated():
 def test_primary_view_declares_custom_property_columns():
     """v_EventInstance_Attendee must declare all props emitted by document_builder."""
     primary = next(e for e in VIEW_CATALOG if e.view_name == "v_EventInstance_Attendee")
-    assert set(primary.property_columns) == {"attendeeName", "company", "attendeeCode"}
+    assert set(primary.property_columns) == {"attendeeName", "attendeeCompany", "attendeeCode"}
 
 
 def test_secondary_views_have_no_property_columns():
