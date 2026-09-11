@@ -34,7 +34,7 @@ info:
     AttendeeID, EventInstanceID. Confirm column names with the Schema Explorer.
 
 servers:
-  - url: "https://SERVER_HOST"
+  - url: "https://g2e.allencloud.com"
 
 paths:
   /aggregate:
@@ -211,8 +211,8 @@ components:
             additionalProperties: true
           description: |
             Aggregated rows. With group_by_column: one row per group value with the
-            metric (e.g. {"CompanyID": 12345, "count": 18}). Without it: a single row
-            with only the metric. The metric key matches `aggregation`.
+            metric (e.g. {"CompanyName": "Maverick Capital, Ltd.", "count": 18}). Without
+            it: a single row with only the metric. The metric key matches `aggregation`.
           example:
             - CompanyName: "Maverick Capital, Ltd."
               count: 18

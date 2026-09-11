@@ -38,7 +38,7 @@ info:
     **Row limit:** defaults to 500 rows; set `limit` to any positive integer for more.
 
 servers:
-  - url: "https://SERVER_HOST"
+  - url: "https://g2e.allencloud.com"
 
 paths:
   /query:

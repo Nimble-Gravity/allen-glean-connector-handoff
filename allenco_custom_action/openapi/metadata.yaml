@@ -28,7 +28,7 @@ info:
     for a view. Never both in the same request.
 
 servers:
-  - url: "https://SERVER_HOST"
+  - url: "https://g2e.allencloud.com"
 
 paths:
   /metadata:
@@ -193,6 +193,8 @@ components:
         - detail
       properties:
         detail:
-          description: "Error message string describing what went wrong."
-          type: string
+          description: |
+            Error description. A string for server errors (404, 500, 403), or a list of
+            validation error objects for request errors (400) raised by automatic query
+            parameter type coercion.
       additionalProperties: true
