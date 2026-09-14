@@ -1,6 +1,6 @@
 """Entry point for the Allen & Co → Glean connector (indexer).
 
-One-shot batch job: read the four read-only EMS views from the Azure SQL MI, build
+One-shot batch job: read four read-only EMS views from the Azure SQL MI, build
 Glean documents with AD/Entra-derived ACLs, and push them via the Glean Indexing
 API. Set GLEAN_ENABLE_INDEXING=false to dump documents to .outputs/ instead of
 pushing (a dry run also tolerates an unreachable DB, producing zero documents).
@@ -247,8 +247,7 @@ def _run(
                 df_attendee=dfs.get("v_EventInstance_Attendee", pd.DataFrame()),
                 df_catering=dfs.get("v_Catering_TableAssignment", pd.DataFrame()),
                 df_activities=dfs.get("v_Activity_Attendee_TimeRange", pd.DataFrame()),
-                df_air=dfs.get("v_TravelAir", pd.DataFrame()),
-                df_ground=dfs.get("v_TravelGround", pd.DataFrame()),
+                df_travel=dfs.get("v_Travel", pd.DataFrame()),
                 datasource=datasource,
                 allowed_users=allowed_refs or None,
                 view_url=settings.view_url or settings.view_url_base,

@@ -16,7 +16,8 @@ regardless of ``DB_SCHEMA``.
     ``UpdatedOn`` is the watermark column (available for incremental sync once
     multi-view watermarking is implemented).
   - Tier 3 — detail: ``v_Catering_TableAssignment`` (carries FormalName),
-    ``v_Activity_Attendee_TimeRange``, ``v_TravelAir``, ``v_TravelGround``.
+    ``v_Activity_Attendee_TimeRange``, ``v_Travel`` (unified air + ground per leg;
+    replaces former ``v_TravelAir`` + ``v_TravelGround`` pair).
 
 **Disabled (blocked on ConferenceImage — the name-bearing views):**
   - ``v_Attendee_Global`` and ``v_Invitation_CurrentStatus`` transitively read
@@ -87,13 +88,11 @@ VIEW_CATALOG: tuple[ViewCatalogEntry, ...] = (
         watermark_column=None,
         schema="rpt",
     ),
+    # v_Travel unifies air + ground transport in one row per leg (Arrival/Departure).
+    # Replaces the former v_TravelAir + v_TravelGround pair — same 63 k rows, richer
+    # columns: IsAllenPlane, GroundPickUpLocationName, DriveShareInfo, bag-pull flags.
     ViewCatalogEntry(
-        view_name="v_TravelAir",
-        watermark_column="UpdatedOn",
-        schema="rpt",
-    ),
-    ViewCatalogEntry(
-        view_name="v_TravelGround",
+        view_name="v_Travel",
         watermark_column="UpdatedOn",
         schema="rpt",
     ),

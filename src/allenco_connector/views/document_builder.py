@@ -1,4 +1,4 @@
-"""Build Glean DocumentDefinitions from 5 EMS views.
+"""Build Glean DocumentDefinitions from 4 EMS views.
 
 One document per (AttendeeID, EventInstanceID) — a Conference Attendance Profile
 that aggregates registration, catering, activities, and travel into one rich body.
@@ -150,82 +150,67 @@ def _build_activity_schedule(df: pd.DataFrame) -> list[dict[str, Any]]:
     return entries
 
 
-def _build_air_travel(df: pd.DataFrame) -> list[dict[str, Any]]:
+def _build_travel(df: pd.DataFrame) -> list[dict[str, Any]]:
+    """Build travel legs from v_Travel (unified air + ground per leg).
+
+    Each row in v_Travel is one Arrival or Departure record that carries both the
+    air segment (airline, flight, airports) and the ground transport (car service,
+    pickup/dropoff) in the same row. The resulting leg dict reflects that structure.
+    """
     legs = []
     for _, row in df.iterrows():
+        # Air origin — prefer airport code+name, fall back to originating city string.
         from_code = _str(row, "ToFromAirportCode")
         from_name = _str(row, "ToFromAirportName")
         from_city = _str(row, "EMS1_OriginatingCity")
-        if from_code and from_name:
-            from_str: str | None = f"{from_code} {from_name}"
-        elif from_city:
-            from_str = from_city
-        else:
-            from_str = None
+        from_str: str | None = (
+            f"{from_code} {from_name}" if from_code and from_name else from_city
+        )
 
         to_code = _str(row, "AirportCode")
         to_name = _str(row, "AirportName")
         to_str: str | None = f"{to_code} {to_name}" if to_code and to_name else to_name
 
+        # Ground pickup/dropoff — prefer the GroundPickUp* columns; fall back to Air*.
+        pickup = _str(row, "GroundPickUpLocationName") or _str(row, "AirPickUpLocationName")
+        dropoff = _str(row, "GroundDropOffLocationName") or _str(row, "AirDropOffLocationName")
+        ground_date = _str(row, "OverridePickupDate") or _str(row, "GroundTravelDate")
+        ground_time = _str(row, "OverridePickupTime") or _str(row, "GroundTravelTime")
+
         leg: dict[str, Any] = {
             "direction": _str(row, "TravelRecordTypeName"),
-            "method": _str(row, "TravelMethodAirName"),
-            "date": _str(row, "TravelDate"),
-            "time": _str(row, "TravelTime"),
+            # Air segment
+            "air_method": _str(row, "TravelMethodAirName"),
+            "air_date": _str(row, "AirTravelDate"),
+            "air_time": _str(row, "AirTravelTime"),
             "from": from_str,
             "to": to_str,
             "airline": _str(row, "AirlineName"),
             "flight": _str(row, "FlightOrTail"),
-            "passengers": _get(row, "NumberOfPassengers"),
-        }
-
-        notes = _join_notes(_str(row, "RSVPComments"), _str(row, "CoordinatorComments"))
-        if notes:
-            leg["notes"] = notes
-
-        flags = []
-        if _get(row, "IsAllenPlane"):
-            flags.append("Allen Plane")
-        if _get(row, "IsDepartureLetterNeeded"):
-            flags.append("Departure Letter Needed")
-        if _get(row, "IsSpouseTravelSeparate"):
-            flags.append("Spouse Travels Separately")
-        if flags:
-            leg["flags"] = flags
-
-        legs.append(leg)
-    return legs
-
-
-def _build_ground_travel(df: pd.DataFrame) -> list[dict[str, Any]]:
-    legs = []
-    for _, row in df.iterrows():
-        date = _str(row, "OverridePickupDate") or _str(row, "TravelDate")
-        time_ = _str(row, "OverridePickupTime") or _str(row, "TravelTime")
-
-        leg: dict[str, Any] = {
-            "direction": _str(row, "TravelRecordTypeName"),
-            "method": _str(row, "TravelMethodGroundName"),
+            "air_passengers": _get(row, "AirNumberOfPassengers"),
+            # Ground segment
+            "ground_method": _str(row, "TravelMethodGroundName"),
             "car_service": _str(row, "CarServiceTypeName"),
-            "date": date,
-            "time": time_,
-            "pickup": _str(row, "PickUpLocationName"),
-            "dropoff": _str(row, "DropOffLocationName"),
-            "passengers": _get(row, "NumberOfPassengers"),
+            "ground_date": ground_date,
+            "ground_time": ground_time,
+            "pickup": pickup,
+            "dropoff": dropoff,
+            "ground_passengers": _get(row, "GroundNumberOfPassengers"),
             "bags": _get(row, "NumberOfBags"),
         }
 
-        rideshare = _str(row, "DriveShareInfo")
+        rideshare = _str(row, "AirRideShareInfo") or _str(row, "DriveShareInfo")
         if rideshare:
             leg["rideshare"] = rideshare
 
-        comments = _join_notes(
-            _str(row, "Comments"),
+        notes = _join_notes(
             _str(row, "RSVPComments"),
             _str(row, "CoordinatorComments"),
+            _str(row, "AirComments"),
+            _str(row, "GroundComments"),
         )
-        if comments:
-            leg["comments"] = comments
+        if notes:
+            leg["notes"] = notes
 
         child_seats: dict[str, int] = {}
         for seat_col, key in [
@@ -241,6 +226,12 @@ def _build_ground_travel(df: pd.DataFrame) -> list[dict[str, Any]]:
             leg["child_seats"] = child_seats
 
         flags = []
+        if _get(row, "IsAllenPlane"):
+            flags.append("Allen Plane")
+        if _get(row, "IsDepartureLetterNeeded"):
+            flags.append("Departure Letter Needed")
+        if _get(row, "IsSpouseTravelSeparate"):
+            flags.append("Spouse Travels Separately")
         if _get(row, "IsBagPullNeeded"):
             flags.append("Bag Pull Needed")
         if _get(row, "IsBagPull"):
@@ -261,8 +252,7 @@ def _build_payload(
     name: str,
     catering_df: pd.DataFrame,
     activities_df: pd.DataFrame,
-    air_df: pd.DataFrame,
-    ground_df: pd.DataFrame,
+    travel_df: pd.DataFrame,
 ) -> dict[str, Any]:
     company = _str(reg_row, "CompanyName") or _str(reg_row, "PreferredCompany") or ""
     title = _str(reg_row, "Title") or ""
@@ -300,8 +290,7 @@ def _build_payload(
         "flags": _build_flags(reg_row),
         "catering": _build_catering(catering_df),
         "activity_schedule": _build_activity_schedule(activities_df),
-        "air_travel": _build_air_travel(air_df),
-        "ground_travel": _build_ground_travel(ground_df),
+        "travel": _build_travel(travel_df),
     }
 
     if preferred_title:
@@ -325,8 +314,7 @@ def build_conference_attendance_documents(
     df_attendee: pd.DataFrame,
     df_catering: pd.DataFrame,
     df_activities: pd.DataFrame,
-    df_air: pd.DataFrame,
-    df_ground: pd.DataFrame,
+    df_travel: pd.DataFrame,
     *,
     datasource: str,
     allowed_users: Iterable[UserReferenceDefinition] | None = None,
@@ -334,7 +322,7 @@ def build_conference_attendance_documents(
 ) -> list[DocumentDefinition]:
     """One DocumentDefinition per (AttendeeID, EventInstanceID).
 
-    Aggregates all 5 EMS views. Deleted/inactive attendee rows are skipped.
+    Aggregates 4 EMS views. Deleted/inactive attendee rows are skipped.
     Person names are resolved from catering across all events (cross-event lookup).
     """
     if df_attendee.empty:
@@ -356,8 +344,7 @@ def build_conference_attendance_documents(
 
     catering_idx = _index(df_catering)
     activities_idx = _index(df_activities)
-    air_idx = _index(df_air)
-    ground_idx = _index(df_ground)
+    travel_idx = _index(df_travel)
 
     allowed = list(allowed_users or [])
     documents: list[DocumentDefinition] = []
@@ -377,8 +364,7 @@ def build_conference_attendance_documents(
                 name,
                 catering_idx.get(key, pd.DataFrame()),
                 activities_idx.get(key, pd.DataFrame()),
-                air_idx.get(key, pd.DataFrame()),
-                ground_idx.get(key, pd.DataFrame()),
+                travel_idx.get(key, pd.DataFrame()),
             )
 
             # Overwrite each iteration — groupby sorts ascending so the last
