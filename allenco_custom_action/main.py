@@ -23,8 +23,9 @@ from permissions import (
     load_view_permissions_cache,
 )
 from routers import aggregate, metadata, query
-from settings import load_api_key, load_db_settings, load_max_rows
+from settings import _log_db_settings, load_api_key, load_db_settings, load_max_rows
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -34,6 +35,7 @@ async def lifespan(app: FastAPI):
     app.state.notifier = build_api_notifier()
     try:
         app.state.db_settings = load_db_settings()
+        _log_db_settings(app.state.db_settings)
         app.state.max_rows = load_max_rows()
         app.state.api_key = load_api_key()
         # View access: all-access mode (VIEW_PERMISSIONS_ALL_ACCESS) or the SQL

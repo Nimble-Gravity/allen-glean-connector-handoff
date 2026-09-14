@@ -5,11 +5,14 @@ Mirrors the DB-related parts of src/config/config.py without importing from it
 DbSettings and the auth-mode constants in sync with src/config/config.py.
 """
 
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 # Load the shared .env from the project root (one level up). override=False so real
 # environment variables (container-injected in prod, or set by the test harness) win
@@ -73,6 +76,27 @@ def load_db_settings() -> DbSettings:
         trust_server_certificate=_read_bool_env("DB_TRUST_SERVER_CERTIFICATE", default=False),
         host_name_in_certificate=_read_str_env("DB_HOST_NAME_IN_CERTIFICATE") or None,
         msi_client_id=_read_str_env("DB_MSI_CLIENT_ID") or _read_str_env("AZURE_CLIENT_ID"),
+    )
+
+
+def _log_db_settings(settings: DbSettings) -> None:
+    """Log every DbSettings field (password masked) to debug connection mismatches."""
+    logger.warning(
+        "DbSettings: server=%r database=%r schema=%r port=%r driver=%r auth_mode=%r "
+        "user=%r password=%s encrypt=%r trust_server_certificate=%r "
+        "host_name_in_certificate=%r msi_client_id=%r",
+        settings.server,
+        settings.database,
+        settings.schema,
+        settings.port,
+        settings.driver,
+        settings.auth_mode,
+        settings.user,
+        "<set>" if settings.password else "<empty>",
+        settings.encrypt,
+        settings.trust_server_certificate,
+        settings.host_name_in_certificate,
+        settings.msi_client_id,
     )
 
 
