@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from pprint import pprint
 from typing import Any
@@ -42,9 +43,9 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     _load_env()
 
-    api_token = dotenv.get("GLEAN_INDEXING_API_KEY")
-    instance = dotenv.get("GLEAN_INSTANCE")
-    datasource = dotenv.get("GLEAN_DATASOURCE")
+    api_token = os.environ.get("GLEAN_INDEXING_API_KEY")
+    instance = os.environ.get("GLEAN_INSTANCE")
+    datasource = os.environ.get("GLEAN_DATASOURCE")
 
     try:
         with Glean(api_token=api_token, instance=instance) as glean:
