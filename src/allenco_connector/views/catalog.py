@@ -74,6 +74,7 @@ VIEW_CATALOG: tuple[ViewCatalogEntry, ...] = (
         watermark_column=None,
         schema="rpt",
         object_type="conference",
+        property_columns=("isCurrent", "eventYear"),
     ),
     # Tier 2 — registration record. UpdatedOn is available for future incremental sync.
     # property_columns declares every custom property emitted by document_builder so

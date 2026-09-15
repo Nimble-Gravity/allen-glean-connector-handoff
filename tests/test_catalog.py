@@ -103,5 +103,6 @@ def test_primary_view_declares_custom_property_columns():
 
 def test_secondary_views_have_no_property_columns():
     """Detail views aggregate into the same document; they don't declare extra props."""
-    secondary = [e for e in VIEW_CATALOG if e.view_name != "v_EventInstance_Attendee"]
+    primary_views = {"v_EventInstance_Attendee", "v_EventInstance_PrevNext"}
+    secondary = [e for e in VIEW_CATALOG if e.view_name not in primary_views]
     assert all(e.property_columns == () for e in secondary)
