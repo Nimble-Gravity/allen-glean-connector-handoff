@@ -20,11 +20,11 @@ def test_real_catalog_all_rpt_schema():
 def test_real_catalog_enabled_views():
     enabled = [e for e in VIEW_CATALOG if e.enabled]
     assert {e.view_name for e in enabled} == {
+        "v_EventInstance_PrevNext",
         "v_EventInstance_Attendee",
         "v_Catering_TableAssignment",
         "v_Activity_Attendee_TimeRange",
-        "v_TravelAir",
-        "v_TravelGround",
+        "v_Travel",
     }
 
 

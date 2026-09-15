@@ -20,6 +20,7 @@ from allenco_connector.db_connection import get_connection
 from allenco_connector.groups import load_users_with_groups
 from allenco_connector.sync_state import build_sync_state_store
 from allenco_connector.views.catalog import VIEW_CATALOG
+from allenco_connector.views.conference_builder import build_conference_documents
 from allenco_connector.views.document_builder import build_conference_attendance_documents
 from allenco_connector.views.registry import build_view_specs
 from config.config import (
@@ -243,15 +244,26 @@ def _run(
                 row_limit=settings.fetch_row_limit,
             )
             dfs, failed_views = _fetch_all_views(specs, conn, notify=notify)
+            df_attendee = dfs.get("v_EventInstance_Attendee", pd.DataFrame())
+            df_travel = dfs.get("v_Travel", pd.DataFrame())
             documents = build_conference_attendance_documents(
-                df_attendee=dfs.get("v_EventInstance_Attendee", pd.DataFrame()),
+                df_attendee=df_attendee,
                 df_catering=dfs.get("v_Catering_TableAssignment", pd.DataFrame()),
                 df_activities=dfs.get("v_Activity_Attendee_TimeRange", pd.DataFrame()),
-                df_travel=dfs.get("v_Travel", pd.DataFrame()),
+                df_travel=df_travel,
                 datasource=datasource,
                 allowed_users=allowed_refs or None,
                 view_url=settings.view_url or settings.view_url_base,
             )
+            conference_docs = build_conference_documents(
+                df_event=dfs.get("v_EventInstance_PrevNext", pd.DataFrame()),
+                df_attendee=df_attendee,
+                df_travel=df_travel,
+                datasource=datasource,
+                allowed_users=allowed_refs or None,
+                view_url=settings.view_url or settings.view_url_base,
+            )
+            documents = documents + conference_docs
             state.records_fetched = sum(len(df) for df in dfs.values())
         finally:
             conn.close()

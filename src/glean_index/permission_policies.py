@@ -23,6 +23,7 @@ class IndexedDocumentKind(StrEnum):
     """The kinds of documents the indexer pushes."""
 
     CONFERENCE_ATTENDANCE = "conferenceAttendance"
+    CONFERENCE = "conference"
 
 
 def load_allowed_groups() -> frozenset[str]:
@@ -48,6 +49,8 @@ def user_may_access_indexed_document(user: GlobalUser, kind: IndexedDocumentKind
     """
     match kind:
         case IndexedDocumentKind.CONFERENCE_ATTENDANCE:
+            return bool(load_allowed_groups().intersection(user.groups))
+        case IndexedDocumentKind.CONFERENCE:
             return bool(load_allowed_groups().intersection(user.groups))
         case _:  # pragma: no cover - exhaustiveness guard
             assert_never(kind)

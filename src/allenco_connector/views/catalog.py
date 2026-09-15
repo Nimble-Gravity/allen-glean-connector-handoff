@@ -67,6 +67,14 @@ class ViewCatalogEntry:
 #    in the "binds today" group works without it.
 VIEW_CATALOG: tuple[ViewCatalogEntry, ...] = (
     # ══ Binds today (no ConferenceImage) — ENABLED ═══════════════════════════════
+    # Conference identity — one row per conference. IsCurrentByMaster flags the active
+    # one. Prev/Next columns give historical context. Full fetch always (small table).
+    ViewCatalogEntry(
+        view_name="v_EventInstance_PrevNext",
+        watermark_column=None,
+        schema="rpt",
+        object_type="conference",
+    ),
     # Tier 2 — registration record. UpdatedOn is available for future incremental sync.
     # property_columns declares every custom property emitted by document_builder so
     # setup_datasource.py registers them with Glean before the first index run.
