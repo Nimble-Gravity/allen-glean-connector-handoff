@@ -11,11 +11,13 @@ view's id_column) so you can confirm they landed and see their ACL.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
 from pathlib import Path
 from pprint import pprint
+from typing import Any
 
 from dotenv import load_dotenv
 from glean.api_client import Glean
@@ -33,10 +35,26 @@ def _get_client() -> Glean:
     return Glean(api_token=api_token, instance=instance)
 
 
+def _recover_200(exc: glean_errors.GleanError) -> Any:
+    """Recover the payload when the SDK misclassifies an HTTP 200 as an error.
+
+    The indexing API often returns HTTP 200 with ``application/json`` while the
+    generated client only accepts ``application/json; charset=UTF-8``, which
+    surfaces as ``GleanError`` even on success (see status.py). Re-raise
+    anything that isn't actually a 200.
+    """
+    if exc.status_code != 200:
+        raise exc
+    return json.loads(exc.body)
+
+
 def cmd_count(datasource: str) -> int:
     with _get_client() as glean:
-        res = glean.indexing.documents.count(datasource=datasource)
-        print("DOCUMENT COUNT:", res.document_count)
+        try:
+            res = glean.indexing.documents.count(datasource=datasource)
+            print("DOCUMENT COUNT:", res.document_count)
+        except glean_errors.GleanError as exc:
+            pprint(_recover_200(exc))
     return 0
 
 
@@ -50,19 +68,25 @@ def cmd_list(datasource: str, object_type: str, doc_ids: list[str]) -> int:
                 )
                 pprint(dbg)
             except glean_errors.GleanError as exc:
-                logging.error("debug failed for %s: %s", doc_id, exc)
+                try:
+                    pprint(_recover_200(exc))
+                except glean_errors.GleanError:
+                    logging.error("debug failed for %s: %s", doc_id, exc)
     return 0
 
 
 def cmd_access(datasource: str, object_type: str, doc_id: str, user_email: str) -> int:
     with _get_client() as glean:
-        res = glean.indexing.documents.check_access(
-            datasource=datasource,
-            object_type=object_type,
-            doc_id=doc_id,
-            user_email=user_email,
-        )
-        pprint(res)
+        try:
+            res = glean.indexing.documents.check_access(
+                datasource=datasource,
+                object_type=object_type,
+                doc_id=doc_id,
+                user_email=user_email,
+            )
+            pprint(res)
+        except glean_errors.GleanError as exc:
+            pprint(_recover_200(exc))
     return 0
 
 
