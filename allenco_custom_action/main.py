@@ -88,6 +88,12 @@ async def validation_exception_handler(
     return JSONResponse(status_code=400, content={"detail": exc.errors()})
 
 
+@app.get("/", tags=["health"])
+def root() -> dict[str, str]:
+    """Service info — unauthenticated root probe."""
+    return {"status": "running", "service": "Allen & Co Glean Custom Action API"}
+
+
 @app.get("/health", tags=["health"])
 def health() -> dict[str, str]:
     """Liveness/readiness probe — unauthenticated (see dependencies._PUBLIC_PATHS).

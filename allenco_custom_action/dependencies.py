@@ -35,7 +35,7 @@ def get_all_access(request: Request) -> bool:
 
 # Unauthenticated paths (health/liveness probes) — the platform, not Glean, calls
 # these, so they must not require the bearer key.
-_PUBLIC_PATHS = frozenset({"/health"})
+_PUBLIC_PATHS = frozenset({"/health", "/"})
 
 
 def verify_api_key(
