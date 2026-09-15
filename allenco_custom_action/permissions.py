@@ -6,9 +6,9 @@ Allen & Co derives view access from Active Directory / Entra ID groups exposed a
 **SQL view** in the EMS DB (the decided source — not Microsoft Graph; mirrors the
 indexer's allenco_connector.groups). The view maps (EMS view name → allowed user
 email), one row per grant. It is configured via env (see load_view_permissions_cache)
-and is **opt-in**: when DB_VIEW_PERMISSIONS_VIEW is unset the cache is empty, the API
-boots without touching the DB, and only superusers
-(GLEAN_INDEXING_SUPERUSER_ALLOWED_USERS) pass — every other user is denied.
+and is **opt-in**: when DB_VIEW_PERMISSIONS_VIEW is unset the cache is empty and
+all-access mode activates automatically — every authenticated user passes. Configure
+DB_VIEW_PERMISSIONS_VIEW to enforce per-view grants.
 """
 
 import json
@@ -42,7 +42,7 @@ def load_view_permissions_cache(
     if not view:
         logger.warning(
             "load_view_permissions_cache: SQL permissions view not configured "
-            "(DB_VIEW_PERMISSIONS_VIEW empty) — empty cache (only superusers pass)."
+            "(DB_VIEW_PERMISSIONS_VIEW empty) — empty cache (all-access mode active)."
         )
         return {}
 
@@ -91,13 +91,18 @@ def load_view_permissions_cache(
 def load_view_permissions_all_access() -> bool:
     """Whether every authenticated user may access every view (all-access mode).
 
-    Allen & Co runs all-access: the per-view SQL permissions gate is not used and
-    ``check_user_has_view_access`` always passes (``user_email`` is still logged for
-    audit). Enable with ``VIEW_PERMISSIONS_ALL_ACCESS=true``; default off preserves
-    deny-by-default, so the gate can be re-enabled later without a code change.
+    Returns True when VIEW_PERMISSIONS_ALL_ACCESS=true OR when DB_VIEW_PERMISSIONS_VIEW
+    is unset — the API is usable before the permissions view is provisioned. Set
+    DB_VIEW_PERMISSIONS_VIEW to switch to per-view grant enforcement.
     """
     raw = (os.environ.get("VIEW_PERMISSIONS_ALL_ACCESS") or "").strip().lower()
-    return raw in ("1", "true", "yes")
+    if raw in ("1", "true", "yes"):
+        return True
+    # When no SQL permissions view is configured, default to all-access so the
+    # API is usable before the permissions view is provisioned.
+    if not (os.environ.get("DB_VIEW_PERMISSIONS_VIEW") or "").strip():
+        return True
+    return False
 
 
 def load_superuser_emails() -> frozenset[str]:
