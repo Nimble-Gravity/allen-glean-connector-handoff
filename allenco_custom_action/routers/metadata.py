@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from notifications_setup import Notifier, notify_db_error
 from permissions import PERMISSION_DENIED_MESSAGE, check_user_has_view_access
 from schemas import ColumnInfo, MetadataResponse
-from settings import DbSettings
+from settings import DbSettings, load_allowed_views
 from validators import SAFE_IDENTIFIER
 
 logger = logging.getLogger(__name__)
@@ -54,6 +54,14 @@ def get_metadata(
             detail="show_view_columns must contain only letters, digits, and underscores.",
         )
 
+    # Read the allowlist fresh every request so container-env changes take effect
+    # without a code change or redeployment.
+    allowed = load_allowed_views()
+
+    if show_all_views and allowed:
+        # Return the configured allowlist directly — no DB round-trip needed.
+        return MetadataResponse(user_email=user_email, views=sorted(allowed.keys()))
+
     try:
         conn = get_connection(settings)
     except pyodbc.Error as exc:
@@ -64,14 +72,18 @@ def get_metadata(
         ) from exc
 
     try:
-        if show_view_columns is not None and not check_user_has_view_access(
-            user_email, show_view_columns, view_perm_cache, superuser_emails, all_access
-        ):
-            raise HTTPException(status_code=403, detail=PERMISSION_DENIED_MESSAGE)
+        if show_view_columns is not None:
+            if allowed and show_view_columns.lower() not in allowed:
+                raise HTTPException(status_code=403, detail="View not in allowed list.")
+            if not check_user_has_view_access(
+                user_email, show_view_columns, view_perm_cache, superuser_emails, all_access
+            ):
+                raise HTTPException(status_code=403, detail=PERMISSION_DENIED_MESSAGE)
 
         cursor = conn.cursor()
 
         if show_all_views:
+            # No allowlist set — fall back to querying INFORMATION_SCHEMA for DB_SCHEMA.
             cursor.execute(
                 "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.VIEWS "
                 "WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME",
@@ -80,13 +92,19 @@ def get_metadata(
             views = [row[0] for row in cursor.fetchall()]
             return MetadataResponse(user_email=user_email, views=views)
 
+        # show_view_columns path — use schema from allowlist when available.
+        effective_schema = (
+            (allowed.get(show_view_columns.lower()) or settings.schema)
+            if allowed
+            else settings.schema
+        )
         cursor.execute(
             "SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE "
             "FROM INFORMATION_SCHEMA.COLUMNS "
             "WHERE TABLE_NAME = ? AND TABLE_SCHEMA = ? "
             "ORDER BY ORDINAL_POSITION",
             show_view_columns,
-            settings.schema,
+            effective_schema,
         )
         rows = cursor.fetchall()
         if not rows:

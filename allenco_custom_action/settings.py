@@ -111,6 +111,29 @@ def load_max_rows() -> int:
     return max(1, int(raw))
 
 
+def load_allowed_views() -> dict[str, str]:
+    """Read CUSTOM_ACTION_ALLOWED_VIEWS from os.environ on every call (never cached).
+
+    Returns {view_name_lower: schema_lower}. An empty dict means no restriction.
+    Format: comma-separated schema.view_name pairs, e.g. ``dbo.v_Foo,rpt.v_Bar``.
+    Entries without a schema prefix fall back to DB_SCHEMA at query time.
+    """
+    raw = (os.environ.get("CUSTOM_ACTION_ALLOWED_VIEWS") or "").strip()
+    if not raw:
+        return {}
+    result: dict[str, str] = {}
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        if "." in entry:
+            schema, name = entry.split(".", 1)
+            result[name.lower()] = schema.lower()
+        else:
+            result[entry.lower()] = ""
+    return result
+
+
 def _read_bool_env(key: str, *, default: bool) -> bool:
     raw = (os.environ.get(key) or "").strip().lower()
     if raw in ("1", "true", "yes"):

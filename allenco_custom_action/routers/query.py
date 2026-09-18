@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from notifications_setup import Notifier, notify_db_error
 from permissions import PERMISSION_DENIED_MESSAGE, check_user_has_view_access
 from schemas import QueryResponse
-from settings import DbSettings
+from settings import DbSettings, load_allowed_views
 from validators import SAFE_IDENTIFIER, Filter, _coerce, build_where, parse_filters
 
 logger = logging.getLogger(__name__)
@@ -94,6 +94,11 @@ def get_query(
 
     effective_limit = limit
 
+    allowed = load_allowed_views()
+    if allowed and view_name.lower() not in allowed:
+        raise HTTPException(status_code=403, detail="View not in allowed list.")
+    effective_schema = (allowed.get(view_name.lower()) or settings.schema) if allowed else settings.schema
+
     try:
         conn = get_connection(settings)
     except pyodbc.Error as exc:
@@ -115,7 +120,7 @@ def get_query(
             "SELECT COUNT(*) FROM INFORMATION_SCHEMA.VIEWS "
             "WHERE TABLE_NAME = ? AND TABLE_SCHEMA = ?",
             view_name,
-            settings.schema,
+            effective_schema,
         )
         if cursor.fetchone()[0] == 0:
             raise HTTPException(status_code=404, detail=f"View '{view_name}' not found.")
@@ -123,7 +128,7 @@ def get_query(
         if distinct_column is not None:
             parts = [
                 f"SELECT DISTINCT TOP (?) [{distinct_column}]",
-                f"FROM [{settings.schema}].[{view_name}]",
+                f"FROM [{effective_schema}].[{view_name}]",
                 f"WHERE [{distinct_column}] IS NOT NULL",
             ]
             params: list = [effective_limit]
@@ -133,7 +138,7 @@ def get_query(
             parts.append(f"ORDER BY [{distinct_column}]")
         else:
             col_clause = ", ".join(f"[{c}]" for c in parsed_columns) if parsed_columns else "*"
-            parts = [f"SELECT TOP (?) {col_clause} FROM [{settings.schema}].[{view_name}]"]
+            parts = [f"SELECT TOP (?) {col_clause} FROM [{effective_schema}].[{view_name}]"]
             params = [effective_limit]
             predicates = build_where(parsed_filters, params)
             if predicates:

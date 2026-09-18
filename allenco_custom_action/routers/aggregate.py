@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from notifications_setup import Notifier, notify_db_error
 from permissions import PERMISSION_DENIED_MESSAGE, check_user_has_view_access
 from schemas import QueryResponse
-from settings import DbSettings
+from settings import DbSettings, load_allowed_views
 from validators import SAFE_IDENTIFIER, Filter, _coerce, build_where, parse_filters
 
 logger = logging.getLogger(__name__)
@@ -87,6 +87,11 @@ def get_aggregate(
     )
     select_clause = f"[{group_by_column}], {agg_expr}" if group_by_column else agg_expr
 
+    allowed = load_allowed_views()
+    if allowed and view_name.lower() not in allowed:
+        raise HTTPException(status_code=403, detail="View not in allowed list.")
+    effective_schema = (allowed.get(view_name.lower()) or settings.schema) if allowed else settings.schema
+
     try:
         conn = get_connection(settings)
     except pyodbc.Error as exc:
@@ -108,12 +113,12 @@ def get_aggregate(
             "SELECT COUNT(*) FROM INFORMATION_SCHEMA.VIEWS "
             "WHERE TABLE_NAME = ? AND TABLE_SCHEMA = ?",
             view_name,
-            settings.schema,
+            effective_schema,
         )
         if cursor.fetchone()[0] == 0:
             raise HTTPException(status_code=404, detail=f"View '{view_name}' not found.")
 
-        parts = [f"SELECT {select_clause} FROM [{settings.schema}].[{view_name}]"]
+        parts = [f"SELECT {select_clause} FROM [{effective_schema}].[{view_name}]"]
         params: list = []
 
         predicates = build_where(parsed_filters, params)
