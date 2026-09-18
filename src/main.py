@@ -251,6 +251,8 @@ def _run(
                 df_catering=dfs.get("v_Catering_TableAssignment", pd.DataFrame()),
                 df_activities=dfs.get("v_Activity_Attendee_TimeRange", pd.DataFrame()),
                 df_travel=df_travel,
+                df_event=dfs.get("v_EventInstance", pd.DataFrame()),
+                df_lodging=dfs.get("v_Lodging_Assignments", pd.DataFrame()),
                 datasource=datasource,
                 allowed_users=allowed_refs or None,
                 view_url=settings.view_url or settings.view_url_base,

@@ -105,6 +105,20 @@ VIEW_CATALOG: tuple[ViewCatalogEntry, ...] = (
         watermark_column="UpdatedOn",
         schema="rpt",
     ),
+    # Conference name + dates, keyed by EventInstanceID. Used to enrich each
+    # conference entry inside the conferenceAttendance document (name, start/end).
+    ViewCatalogEntry(
+        view_name="v_EventInstance",
+        watermark_column=None,
+        schema="dbo",
+    ),
+    # Per-attendee, per-conference room assignment. Joined by (AttendeeID,
+    # EventInstanceID) to attach lodging details to each conference entry.
+    ViewCatalogEntry(
+        view_name="v_Lodging_Assignments",
+        watermark_column=None,
+        schema="dbo",
+    ),
     # ══ Blocked on ConferenceImage — DISABLED (enable when the replica can read it) ══
     # These carry the person NAME but their definitions transitively read
     # ConferenceImage.dbo.Attendee_Picture → SQL 4413 bind error on the replica.

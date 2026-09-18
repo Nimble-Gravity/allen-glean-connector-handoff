@@ -1,7 +1,8 @@
-"""Build Glean DocumentDefinitions from 4 EMS views.
+"""Build Glean DocumentDefinitions from 6 EMS views.
 
-One document per (AttendeeID, EventInstanceID) — a Conference Attendance Profile
-that aggregates registration, catering, activities, and travel into one rich body.
+One document per AttendeeID — a Conference Attendance Profile that aggregates,
+per conference, registration, catering, activities, travel, and lodging into
+one rich body.
 """
 
 import logging
@@ -247,12 +248,51 @@ def _build_travel(df: pd.DataFrame) -> list[dict[str, Any]]:
     return legs
 
 
+def _build_conference_info(row: Any | None) -> dict[str, Any]:
+    """Conference name + start/end dates from dbo.v_EventInstance, keyed by EventInstanceID."""
+    if row is None:
+        return {}
+    info: dict[str, Any] = {}
+    name = _str(row, "EventInstance")
+    if name:
+        info["name"] = name
+    start = _str(row, "EventStartDate")
+    if start:
+        info["start_date"] = start[:10]
+    end = _str(row, "EventEndDate")
+    if end:
+        info["end_date"] = end[:10]
+    return info
+
+
+def _build_lodging(df: pd.DataFrame) -> list[dict[str, Any]]:
+    """Room assignments from dbo.v_Lodging_Assignments for one (AttendeeID, EventInstanceID)."""
+    entries = []
+    for _, row in df.iterrows():
+        entry: dict[str, Any] = {
+            "room_number": _str(row, "RoomNumber"),
+            "room_type": _str(row, "RoomType"),
+            "room_code": _str(row, "RoomCode"),
+            "location": _str(row, "Location"),
+            "is_handicap_accessible": bool(_get(row, "IsHandicapAccessible")),
+            "arrival_date": _str(row, "ArrivalDate"),
+            "departure_date": _str(row, "DepartureDate"),
+            "num_nights": _get(row, "NumNightsOnResort"),
+            "is_late_arrival": bool(_get(row, "IsLateArrival")),
+            "is_late_departure": bool(_get(row, "IsLateDeparture")),
+        }
+        entries.append(entry)
+    return entries
+
+
 def _build_payload(
     reg_row: Any,
     name: str,
     catering_df: pd.DataFrame,
     activities_df: pd.DataFrame,
     travel_df: pd.DataFrame,
+    lodging_df: pd.DataFrame,
+    conference_row: Any | None,
 ) -> dict[str, Any]:
     company = _str(reg_row, "CompanyName") or _str(reg_row, "PreferredCompany") or ""
     title = _str(reg_row, "Title") or ""
@@ -291,7 +331,9 @@ def _build_payload(
         "catering": _build_catering(catering_df),
         "activity_schedule": _build_activity_schedule(activities_df),
         "travel": _build_travel(travel_df),
+        "lodging": _build_lodging(lodging_df),
     }
+    payload.update(_build_conference_info(conference_row))
 
     if preferred_title:
         payload["preferred_title"] = preferred_title
@@ -315,6 +357,8 @@ def build_conference_attendance_documents(
     df_catering: pd.DataFrame,
     df_activities: pd.DataFrame,
     df_travel: pd.DataFrame,
+    df_event: pd.DataFrame | None = None,
+    df_lodging: pd.DataFrame | None = None,
     *,
     datasource: str,
     allowed_users: Iterable[UserReferenceDefinition] | None = None,
@@ -322,12 +366,19 @@ def build_conference_attendance_documents(
 ) -> list[DocumentDefinition]:
     """One DocumentDefinition per (AttendeeID, EventInstanceID).
 
-    Aggregates 4 EMS views. Deleted/inactive attendee rows are skipped.
+    Aggregates 6 EMS views. Deleted/inactive attendee rows are skipped.
     Person names are resolved from catering across all events (cross-event lookup).
+    Conference name/dates come from dbo.v_EventInstance (keyed by EventInstanceID);
+    lodging comes from dbo.v_Lodging_Assignments (keyed by AttendeeID + EventInstanceID).
     """
     if df_attendee.empty:
         logger.warning("build_conference_attendance_documents: no attendee rows.")
         return []
+
+    if df_event is None:
+        df_event = pd.DataFrame()
+    if df_lodging is None:
+        df_lodging = pd.DataFrame()
 
     # Drop deleted/inactive registration records
     for col in ("IsDeleted", "IsInactive"):
@@ -345,6 +396,15 @@ def build_conference_attendance_documents(
     catering_idx = _index(df_catering)
     activities_idx = _index(df_activities)
     travel_idx = _index(df_travel)
+    lodging_idx = _index(df_lodging)
+
+    # v_EventInstance has one row per EventInstanceID (no AttendeeID).
+    event_idx: dict[Any, Any] = {}
+    if not df_event.empty and "EventInstanceID" in df_event.columns:
+        for _, row in df_event.iterrows():
+            eid = _get(row, "EventInstanceID")
+            if eid is not None:
+                event_idx[int(eid)] = row
 
     allowed = list(allowed_users or [])
     documents: list[DocumentDefinition] = []
@@ -365,6 +425,8 @@ def build_conference_attendance_documents(
                 catering_idx.get(key, pd.DataFrame()),
                 activities_idx.get(key, pd.DataFrame()),
                 travel_idx.get(key, pd.DataFrame()),
+                lodging_idx.get(key, pd.DataFrame()),
+                event_idx.get(int(event_id)),
             )
 
             # Overwrite each iteration — groupby sorts ascending so the last
